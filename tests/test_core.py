@@ -143,3 +143,13 @@ def test_b3_market_in_cycle(fresh_db):
     assert eq_b3 > 0
     for p in fresh_db.query("SELECT * FROM positions"):
         assert p["market"] == ("b3" if p["symbol"] == "PETR4" else "main")
+
+
+def test_deposit_is_not_profit(fresh_db):
+    fresh_db.execute("INSERT INTO cash_flows(ts,amount,note) VALUES(?,?,?)", (fresh_db.now(), 10_000, "x"))
+    fresh_db.execute("INSERT INTO equity(ts,equity,cash,flows) VALUES(?,?,?,?)", (fresh_db.now(), 10_000, 0, 10_000))
+    fresh_db.execute("INSERT INTO cash_flows(ts,amount,note) VALUES(?,?,?)", (fresh_db.now(), 5_000, "aporte"))
+    assert risk.day_start_equity(15_000) == 15_000          # aporte não vira "lucro do dia"
+    fresh_db.execute("INSERT INTO cash_flows(ts,amount,note) VALUES(?,?,?)", (fresh_db.now(), -8_000, "saque"))
+    risk.update_guards(7_000)                               # saque não dispara a trava
+    assert not fresh_db.get_bool("kill_switch")

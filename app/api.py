@@ -219,7 +219,7 @@ def create_app(engine: Engine) -> FastAPI:
                 raise HTTPException(400, "Para destravar digite CONFIRMO")
             eq, _ = engine.equity()
             db.execute("DELETE FROM equity")  # zera o topo de referência da queda
-            db.execute("INSERT INTO equity(ts,equity,cash) VALUES(?,?,?)", (db.now(), eq, 0))
+            db.execute("INSERT INTO equity(ts,equity,cash,flows) VALUES(?,?,?,?)", (db.now(), eq, 0, risk.net_deposits()))
         for k, val in v.items():
             db.set_setting(k, val)
         db.log(f"Configurações alteradas: {v}")

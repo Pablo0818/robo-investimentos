@@ -109,7 +109,8 @@ class Engine:
                 eq, cash = self.equity()
                 last = db.one("SELECT ts FROM equity ORDER BY ts DESC LIMIT 1")
                 if not last or (datetime.now(timezone.utc) - datetime.fromisoformat(last["ts"])).total_seconds() >= 55:
-                    db.execute("INSERT INTO equity(ts,equity,cash) VALUES(?,?,?)", (db.now(), eq, cash))
+                    db.execute("INSERT INTO equity(ts,equity,cash,flows) VALUES(?,?,?,?)",
+                               (db.now(), eq, cash, risk.net_deposits()))
                 risk.update_guards(eq, self.notify)
                 self._maybe_evolve()
                 for h in self.hooks:

@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS positions (
     symbol TEXT PRIMARY KEY, qty REAL, avg_price REAL, stop REAL, take REAL,
     opened_ts TEXT, strategy TEXT, highest REAL, market TEXT DEFAULT 'main'
 );
-CREATE TABLE IF NOT EXISTS equity (ts TEXT, equity REAL, cash REAL);
+CREATE TABLE IF NOT EXISTS equity (ts TEXT, equity REAL, cash REAL, flows REAL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS strategies (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     symbol TEXT, name TEXT, params TEXT,
@@ -58,6 +58,12 @@ def conn() -> sqlite3.Connection:
             _conn.row_factory = sqlite3.Row
             _conn.execute("PRAGMA journal_mode=WAL")
             _conn.executescript(SCHEMA)
+            try:  # bancos antigos: adiciona coluna de aportes acumulados
+                _conn.execute("ALTER TABLE equity ADD COLUMN flows REAL DEFAULT 0")
+                # histórico antigo: sem dados de aportes, assume resultado zero (evita trava falsa)
+                _conn.execute("UPDATE equity SET flows = equity")
+            except sqlite3.OperationalError:
+                pass
             _conn_path = settings.db_path
             for k, v in DEFAULT_RUNTIME.items():
                 _conn.execute("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)", (k, v))

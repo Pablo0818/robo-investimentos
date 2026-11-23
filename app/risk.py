@@ -29,15 +29,22 @@ def net_deposits() -> float:
     return float(r["s"]) if r else 0.0
 
 
+# Aportes e retiradas NÃO contam como lucro/prejuízo: comparamos "patrimônio - aportes".
 def day_start_equity(current: float) -> float:
+    """Patrimônio do início do dia, ajustado pelos aportes/retiradas feitos desde então."""
     today = datetime.now(timezone.utc).date().isoformat()
-    r = db.one("SELECT equity FROM equity WHERE ts >= ? ORDER BY ts ASC LIMIT 1", (today,))
-    return float(r["equity"]) if r else current
+    r = db.one("SELECT equity, flows FROM equity WHERE ts >= ? ORDER BY ts ASC LIMIT 1", (today,))
+    if not r:
+        return current
+    return float(r["equity"]) + (net_deposits() - float(r["flows"] or 0))
 
 
 def peak_equity(current: float) -> float:
-    r = db.one("SELECT MAX(equity) m FROM equity")
-    return max(current, float(r["m"])) if r and r["m"] is not None else current
+    """Maior patrimônio já atingido, ajustado para a base atual de aportes."""
+    r = db.one("SELECT MAX(equity - COALESCE(flows,0)) m FROM equity")
+    if not r or r["m"] is None:
+        return current
+    return max(current, float(r["m"]) + net_deposits())
 
 
 def sizing_capital(equity: float) -> float:
