@@ -107,10 +107,6 @@ def auto_update(stop: threading.Event) -> None:
 
 
 def main():
-    try:
-        os.nice(10)  # prioridade baixa: os outros sistemas da VPS passam na frente
-    except Exception:
-        pass
     engine = build()
     stop = threading.Event()
     threading.Thread(target=engine.run_forever, args=(stop,), daemon=True, name="engine").start()
