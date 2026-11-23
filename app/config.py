@@ -106,6 +106,8 @@ DEFAULT_RUNTIME = {
     "kill_switch": "false",
     # Perfil de operação: normal | metralhadora (vazio = usa o .env)
     "profile": "normal",
+    "evolve_retry_minutes": "1",   # ativo sem estratégia: testa de novo a cada X minutos
+    "evolve_max_per_cycle": "2",   # no máximo N testes por ciclo (protege a VPS compartilhada)
     "strategy_style": "baixa",   # baixa = comprar na queda e vender na alta | tendencia | todas
     "timeframe": "",
     "crypto_symbols": "",

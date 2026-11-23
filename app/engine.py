@@ -36,7 +36,8 @@ class Engine:
         self.candles: dict[tuple[str, str], "object"] = {}
         self.indices: list[tuple[str, str, str]] = []  # (mercado, símbolo, nome)
         self.index_data: dict[str, dict] = {}
-        self.state: dict[tuple[str, str], dict] = {}  # o que o robô está fazendo em cada ativo
+        self.state: dict[tuple[str, str], dict] = {}
+        self._evolved_this_cycle = 0  # o que o robô está fazendo em cada ativo
         self.last_error: str | None = None
 
     # ------------------------------------------------------------------ util
@@ -132,6 +133,7 @@ class Engine:
             stop.wait(self.cfg.loop_seconds)
 
     def cycle(self) -> None:
+        self._evolved_this_cycle = 0
         with self.lock:
             try:
                 self._expire_signals()
@@ -181,15 +183,21 @@ class Engine:
         if champ is None:
             key = f"evolve_try:{sym}"
             last = db.get_setting(key)
-            if last and datetime.now(timezone.utc) - datetime.fromisoformat(last) < timedelta(hours=1):
-                self._st(market, sym, "sem estratégia", "nenhuma estratégia deu lucro no teste; tenta de novo em até 1h")
-                return  # tenta de novo a cada 1h (novos candles = nova chance)
+            # revezamento justo: cada ativo sem estratégia volta à fila depois que os outros foram testados
+            sem = sum(1 for m in self.strategy_markets for x in self.symbols_for(m) if self.champion(x) is None)
+            per = max(1, int(db.get_float("evolve_max_per_cycle")))
+            wait = timedelta(minutes=max(db.get_float("evolve_retry_minutes"), sem / per) - 0.1)
+            if (last and datetime.now(timezone.utc) - datetime.fromisoformat(last) < wait) or \
+                    self._evolved_this_cycle >= int(db.get_float("evolve_max_per_cycle")):
+                self._st(market, sym, "sem estratégia", "testando estratégias (revezando 2 ativos por minuto)")
+                return
+            self._evolved_this_cycle += 1
             db.set_setting(key, db.now())
             db.log(f"{sym}: sem estratégia aprovada ainda, rodando evolução...")
             evolution.run_for_symbol(sym, df, self.cfg, self.notify, self.timeframe)
             champ = self.champion(sym)
             if champ is None:
-                self._st(market, sym, "sem estratégia", "nenhuma estratégia deu lucro no teste; tenta de novo em 1h")
+                self._st(market, sym, "sem estratégia", "nenhuma estratégia passou no teste ainda; testa de novo em instantes")
                 return
         pos_arr = st.positions(champ["name"], df, champ["params"])
         want, prev = pos_arr[-1], pos_arr[-2]
