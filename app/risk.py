@@ -54,14 +54,35 @@ def sizing_capital(equity: float) -> float:
     return min(equity, base) if base > 0 else equity
 
 
-def position_size(equity: float, cash: float, price: float, stop: float) -> float:
-    """Quantidade a comprar."""
+def performance_weight(symbol: str | None) -> float:
+    """Peso do ativo (0,5x a 1,5x): mais dinheiro para quem está dando lucro.
+
+    Combina a nota da estratégia no teste (fora da amostra) com o resultado real
+    das últimas 10 operações fechadas desse ativo.
+    """
+    if not symbol:
+        return 1.0
+    w = 1.0
+    s = db.one("SELECT oos_sharpe FROM strategies WHERE symbol=? AND status='champion'", (symbol,))
+    if s and s["oos_sharpe"] is not None:
+        w += max(-0.25, min(0.25, (float(s["oos_sharpe"]) - 1.5) / 6))
+    rows = db.query("SELECT pnl FROM trades WHERE symbol=? AND side='sell' ORDER BY id DESC LIMIT 10", (symbol,))
+    if len(rows) >= 3:
+        wins = sum(1 for r in rows if r["pnl"] > 0) / len(rows)
+        net = sum(r["pnl"] for r in rows)
+        w += (wins - 0.5) * 0.5 + (0.1 if net > 0 else -0.1)
+    return max(0.5, min(1.5, w))
+
+
+def position_size(equity: float, cash: float, price: float, stop: float, symbol: str | None = None) -> float:
+    """Quantidade a comprar (ajustada pelo desempenho do ativo)."""
     if price <= 0 or stop >= price:
         return 0.0
     cap = sizing_capital(equity)
-    risk_amt = cap * db.get_float("risk_per_trade")
+    w = performance_weight(symbol)
+    risk_amt = cap * db.get_float("risk_per_trade") * w
     qty_risk = risk_amt / (price - stop)
-    qty_cap = cap * db.get_float("max_position_pct") / price
+    qty_cap = cap * min(0.35, db.get_float("max_position_pct") * w) / price
     qty_cash = cash * 0.98 / price  # folga para taxas
     return max(0.0, min(qty_risk, qty_cap, qty_cash))
 

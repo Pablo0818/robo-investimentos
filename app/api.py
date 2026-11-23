@@ -350,7 +350,15 @@ def create_app(engine: Engine) -> FastAPI:
         wins = [t["pnl"] for t in sells if t["pnl"] > 0]
         losses = [t["pnl"] for t in sells if t["pnl"] <= 0]
         gl = -sum(losses)
-        return {"trades": len(sells), "win_rate": len(wins) / len(sells) if sells else 0,
+        rank = db.query("SELECT symbol, market, SUM(pnl) pnl, COUNT(*) n, "
+                        "SUM(CASE WHEN pnl>0 THEN 1 ELSE 0 END) w FROM trades WHERE side='sell' "
+                        "GROUP BY symbol, market ORDER BY pnl DESC")
+        for r in rank:
+            r["weight"] = risk.performance_weight(r["symbol"])
+        by_mk = db.query("SELECT market, SUM(pnl) pnl, COUNT(*) n FROM trades WHERE side='sell' GROUP BY market "
+                         "ORDER BY pnl DESC")
+        return {"ranking": rank, "by_market": by_mk,
+                "trades": len(sells), "win_rate": len(wins) / len(sells) if sells else 0,
                 "profit_factor": (sum(wins) / gl) if gl > 0 else None,
                 "avg_win": sum(wins) / len(wins) if wins else 0, "avg_loss": sum(losses) / len(losses) if losses else 0,
                 "best": max((t["pnl"] for t in sells), default=0), "worst": min((t["pnl"] for t in sells), default=0),

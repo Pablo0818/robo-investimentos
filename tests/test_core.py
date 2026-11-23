@@ -163,3 +163,15 @@ def test_profile_metralhadora(fresh_db, monkeypatch):
     assert fresh_db.get_setting("max_positions") == "8"
     e.apply_profile("normal")
     assert e.symbols_for("main") == list(settings.symbols)
+
+
+def test_performance_weight(fresh_db):
+    assert risk.performance_weight("X") == 1.0
+    for pnl in (5, 4, 3, 6, -1):
+        fresh_db.execute("INSERT INTO trades(ts,symbol,side,qty,price,fee,pnl) VALUES(?,?,?,?,?,?,?)",
+                         (fresh_db.now(), "X", "sell", 1, 1, 0, pnl))
+    assert risk.performance_weight("X") > 1.0
+    for _ in range(10):
+        fresh_db.execute("INSERT INTO trades(ts,symbol,side,qty,price,fee,pnl) VALUES(?,?,?,?,?,?,?)",
+                         (fresh_db.now(), "Y", "sell", 1, 1, 0, -2))
+    assert risk.performance_weight("Y") < 1.0

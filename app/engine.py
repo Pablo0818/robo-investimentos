@@ -233,7 +233,7 @@ class Engine:
                 return
             stop = live_px - db.get_float("atr_stop_mult") * a
             take = live_px + db.get_float("take_profit_r") * (live_px - stop)
-            qty = b.normalize_qty(sym, risk.position_size(eq, cash, live_px, stop), live_px)
+            qty = b.normalize_qty(sym, risk.position_size(eq, cash, live_px, stop, sym), live_px)
             if qty <= 0:
                 db.log(f"{sym}: sinal de compra, mas o tamanho calculado é menor que o mínimo do ativo", "WARN")
                 return
@@ -310,7 +310,7 @@ class Engine:
                     dist = sig["price"] - sig["stop"]
                     stop = px - dist
                     take = px + db.get_float("take_profit_r") * dist if sig["take"] else 0
-                    qty = b.normalize_qty(sym, risk.position_size(eq, b.get_cash(), px, stop), px)
+                    qty = b.normalize_qty(sym, risk.position_size(eq, b.get_cash(), px, stop, sym), px)
                 else:
                     if not b.is_market_open(sym):
                         raise RuntimeError("mercado fechado")
