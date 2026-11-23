@@ -49,4 +49,14 @@ def build_us_broker(s: Settings) -> Broker | None:
                        label="simulação EUA")
 
 
+def build_b3_broker(s: Settings) -> Broker | None:
+    """B3 em simulação com preços reais do Yahoo (não precisa de corretora)."""
+    if not s.b3_enabled or s.broker == "mt5":
+        return None
+    from .us import B3YahooFeed
+
+    return PaperBroker(B3YahooFeed(), s.b3_initial_capital, 0.0003, 0.0005, cash_key="paper_cash_b3",
+                       label="simulação B3 (R$)")
+
+
 __all__ = ["Broker", "Fill", "build_broker", "PaperBroker", "SyntheticFeed"]

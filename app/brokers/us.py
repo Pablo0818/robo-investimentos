@@ -109,3 +109,28 @@ class AlpacaBroker(Broker):
         if o.get("status") != "filled":
             raise RuntimeError(f"Ordem {o.get('id')} enviada, status {o.get('status')} (confira na Alpaca)")
         return Fill(symbol, side, float(o["filled_qty"]), float(o["filled_avg_price"]), 0.0, order_id=o["id"])
+
+
+class B3YahooFeed(YahooFeed):
+    """Ações da B3 pelo Yahoo (PETR4 -> PETR4.SA). Pregão: 10h às 16h55, dias úteis."""
+    name = "b3"
+
+    @staticmethod
+    def _y(symbol: str) -> str:
+        return symbol if symbol.endswith(".SA") else f"{symbol}.SA"
+
+    def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
+        return super().fetch_ohlcv(self._y(symbol), timeframe, limit)
+
+    def last_price(self, symbol: str) -> float:
+        return super().last_price(self._y(symbol))
+
+    def normalize_qty(self, symbol: str, qty: float, price: float) -> float:
+        return float(int(qty))  # mercado fracionário: 1 ação no mínimo
+
+    def is_market_open(self, symbol: str) -> bool:
+        from datetime import datetime, time as dtime
+        from zoneinfo import ZoneInfo
+
+        n = datetime.now(ZoneInfo("America/Sao_Paulo"))
+        return n.weekday() < 5 and dtime(10, 0) <= n.time() <= dtime(16, 50)

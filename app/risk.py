@@ -72,17 +72,20 @@ def update_guards(equity: float, notify=None) -> None:
             notify(msg)
 
 
-def can_open(symbol: str, equity: float, market_open: bool) -> Check:
+def can_open(symbol: str, equity: float, market_open: bool, market: str = "main") -> Check:
     if db.get_bool("kill_switch"):
         return Check(False, "trava de segurança ligada")
     if db.get_bool("paused"):
         return Check(False, "robô pausado")
     if not market_open:
         return Check(False, "mercado fechado")
-    start = day_start_equity(equity)
-    if start > 0 and (start - equity) / start >= db.get_float("max_daily_loss_pct"):
-        return Check(False, "limite de perda diária atingido")
-    n = db.one("SELECT COUNT(*) c FROM positions WHERE market='main'")["c"]
+    last = db.one("SELECT equity FROM equity ORDER BY ts DESC LIMIT 1")
+    if last:  # perda diária medida no patrimônio total
+        total = float(last["equity"])
+        start = day_start_equity(total)
+        if start > 0 and (start - total) / start >= db.get_float("max_daily_loss_pct"):
+            return Check(False, "limite de perda diária atingido")
+    n = db.one("SELECT COUNT(*) c FROM positions WHERE market=?", (market,))["c"]
     if n >= int(db.get_float("max_positions")):
         return Check(False, "máximo de posições abertas")
     if db.one("SELECT 1 FROM positions WHERE symbol=?", (symbol,)):

@@ -129,3 +129,17 @@ def test_readiness_not_ready_at_start(fresh_db):
 
     r = readiness.check(_engine())
     assert r["ready"] is False and len(r["items"]) == 5
+
+
+def test_b3_market_in_cycle(fresh_db):
+    """Um segundo mercado (B3) roda no mesmo ciclo, com caixa e posições separados."""
+    e = _engine()
+    b3 = PaperBroker(SyntheticFeed(seed=7), 10_000, 0.0003, 0.0005, cash_key="paper_cash_b3")
+    e.add_strategy_market("b3", b3, ["PETR4"])
+    fresh_db.set_setting("execution_mode", "auto")
+    for _ in range(150):
+        e.cycle()
+    eq_b3, cash_b3 = e.market_equity("b3")
+    assert eq_b3 > 0
+    for p in fresh_db.query("SELECT * FROM positions"):
+        assert p["market"] == ("b3" if p["symbol"] == "PETR4" else "main")

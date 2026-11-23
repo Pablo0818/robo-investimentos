@@ -10,7 +10,7 @@ import uvicorn
 
 from app import auth, db, research
 from app.api import create_app
-from app.brokers import build_broker, build_us_broker
+from app.brokers import build_b3_broker, build_broker, build_us_broker
 from app.config import settings
 from app.engine import Engine
 from app.notifier import notify, telegram
@@ -31,6 +31,13 @@ def build():
     engine = Engine(settings, broker, notify=notify, on_signal=telegram.send_signal, us_broker=us)
     if us is not None:
         research.attach(engine)
+    try:
+        b3 = build_b3_broker(settings)
+        if b3 is not None:
+            engine.add_strategy_market("b3", b3, settings.b3_symbols)
+            db.log(f"B3 em simulação (preços reais, R$): {', '.join(settings.b3_symbols)}")
+    except Exception as e:
+        db.log(f"B3 desativada: {e}", "WARN")
 
     def status_txt():
         eq, cash = engine.equity()

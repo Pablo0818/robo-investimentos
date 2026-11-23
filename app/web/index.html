@@ -71,6 +71,7 @@ async function home(m){
     ${kpi("Patrimônio",fmt(S.equity))}${kpi("Lucro total",fmt(S.profit),cls(S.profit))}
     ${kpi("Resultado hoje",fmt(S.day_pnl),cls(S.day_pnl))}${kpi("Queda desde o topo",pct(S.drawdown),S.drawdown>0.1?"neg":"")}
     ${kpi("Caixa",fmt(S.cash))}${kpi("Aportado",fmt(S.deposits))}${kpi("Lucro realizado",fmt(S.realized_pnl),cls(S.realized_pnl))}${kpi("Taxas pagas",fmt(S.fees))}</div>
+    <div class="card"><div class="font-semibold mb-2">Por mercado <span class="text-xs text-slate-500 font-normal">(cada um na sua moeda)</span></div>${(S.by_market||[]).map(m=>`<div class="flex justify-between border-t py-1.5 text-sm"><span>${m.label}</span><span><b>${fmt(m.equity)}</b> <span class="text-xs text-slate-500">caixa ${fmt(m.cash)}</span></span></div>`).join("")}</div>
     <div class="card"><div class="font-semibold mb-2">Evolução do patrimônio</div><canvas id="eq" height="110"></canvas></div>
     <div class="card"><div class="font-semibold mb-2">Sinais aguardando você</div><div id="pend"></div></div>
     ${S.trading_mode=="paper"?`<div class="card"><div class="font-semibold mb-1">Pronto para dinheiro real?</div><div id="ready" class="text-sm text-slate-500">Conferindo...</div></div>`:""}`;
@@ -85,7 +86,7 @@ async function home(m){
 function sigTable(el,rows){
   if(!rows.length){el.innerHTML=`<div class="text-sm text-slate-500">Nada pendente.</div>`;return}
   el.innerHTML=rows.map(s=>`<div class="border rounded-xl p-3 mb-2 ${s.side=="buy"?"border-emerald-300":"border-rose-300"}">
-   <div class="flex justify-between"><b>#${s.id} ${s.side=="buy"?"🟢 COMPRAR":"🔴 VENDER"} ${s.symbol}</b><span class="text-xs text-slate-500">${s.market=="us"?"EUA · ":""}${dt(s.ts)} · ${STA[s.status]||s.status}</span></div>
+   <div class="flex justify-between"><b>#${s.id} ${s.side=="buy"?"🟢 COMPRAR":"🔴 VENDER"} ${s.symbol}</b><span class="text-xs text-slate-500">${({us:"EUA · ",b3:"B3 · "})[s.market]||""}${dt(s.ts)} · ${STA[s.status]||s.status}</span></div>
    <div class="text-sm mt-1">Qtd ${fmt(s.qty,6)} @ ~${fmt(s.price,4)}${s.notional?` · US$ ${fmt(s.notional)}`:""}${s.stop?` · stop ${fmt(s.stop,4)} · alvo ${fmt(s.take,4)}`:""}</div>
    <div class="text-xs text-slate-500 mt-1">${s.strategy} — ${s.reason||""}${s.note?` · <span class="neg">${s.note}</span>`:""}</div>
    ${s.status=="pending"?`<div class="flex gap-2 mt-2"><button class="btn bg-emerald-600 text-white" onclick="act(${s.id},'approve')">✅ Aprovar</button><button class="btn bg-slate-200" onclick="act(${s.id},'reject')">Recusar</button></div>`:""}</div>`).join("")}
@@ -98,7 +99,7 @@ async function signals(m){m.innerHTML=`<div class="card"><div class="font-semibo
 async function positions(m){
   const t=await api("/api/trades?limit=100");
   m.innerHTML=`<div class="card overflow-x-auto"><div class="font-semibold mb-2">Posições abertas</div><table><tr><th>Ativo</th><th>Qtd</th><th>Preço médio</th><th>Atual</th><th>Resultado</th><th>Stop</th><th>Alvo</th><th></th></tr>
-  ${S.positions.map(p=>`<tr><td><b>${p.symbol}</b><div class="text-xs text-slate-500">${p.market=="us"?"EUA":""} ${p.strategy||""}</div></td><td>${fmt(p.qty,4)}</td><td>${fmt(p.avg_price,4)}</td><td>${fmt(p.price,4)}</td><td class="${cls(p.pnl)}">${fmt(p.pnl)} (${pct(p.pnl_pct)})</td><td>${p.stop?fmt(p.stop,4):"-"}</td><td>${p.take?fmt(p.take,4):"-"}</td><td><button class="btn bg-rose-100 text-rose-700" onclick="closePos('${p.symbol}')">Vender</button></td></tr>`).join("")||`<tr><td colspan=8 class="text-slate-500">Nenhuma posição.</td></tr>`}</table></div>
+  ${S.positions.map(p=>`<tr><td><b>${p.symbol}</b><div class="text-xs text-slate-500">${({us:"EUA",b3:"B3"})[p.market]||""} ${p.strategy||""}</div></td><td>${fmt(p.qty,4)}</td><td>${fmt(p.avg_price,4)}</td><td>${fmt(p.price,4)}</td><td class="${cls(p.pnl)}">${fmt(p.pnl)} (${pct(p.pnl_pct)})</td><td>${p.stop?fmt(p.stop,4):"-"}</td><td>${p.take?fmt(p.take,4):"-"}</td><td><button class="btn bg-rose-100 text-rose-700" onclick="closePos('${p.symbol}')">Vender</button></td></tr>`).join("")||`<tr><td colspan=8 class="text-slate-500">Nenhuma posição.</td></tr>`}</table></div>
   <div class="card overflow-x-auto"><div class="font-semibold mb-2">Operações</div><table><tr><th>Data</th><th>Ativo</th><th>Lado</th><th>Qtd</th><th>Preço</th><th>Taxa</th><th>Resultado</th></tr>
   ${t.map(x=>`<tr><td>${dt(x.ts)}</td><td>${x.symbol}</td><td>${x.side=="buy"?"Compra":"Venda"}</td><td>${fmt(x.qty,4)}</td><td>${fmt(x.price,4)}</td><td>${fmt(x.fee)}</td><td class="${cls(x.pnl)}">${x.side=="sell"?fmt(x.pnl):""}</td></tr>`).join("")}</table></div>`}
 async function closePos(s){if(!confirm(`Vender toda a posição de ${s} agora?`))return;toast((await post(`/api/positions/${encodeURIComponent(s)}/close`)).message);render()}
@@ -146,7 +147,7 @@ async function watch(n){const r=await post("/api/us/watch/"+n);toast(r.new+" nov
 
 async function finance(m){const [mo,cf]=await Promise.all([api("/api/report/monthly"),api("/api/cashflows")]);
   m.innerHTML=`<div class="card overflow-x-auto"><div class="font-semibold mb-1">Resultado mensal</div><div class="text-xs text-slate-500 mb-2">Base para apuração de imposto (DARF). Confirme regras e alíquotas com um contador.</div>
-  <table><tr><th>Mês</th><th>Mercado</th><th>Lucro realizado</th><th>Total vendido</th><th>Taxas</th><th>Ops</th></tr>${mo.map(r=>`<tr><td>${r.month}</td><td>${r.market=="us"?"EUA":"Principal"}</td><td class="${cls(r.realized_pnl)}">${fmt(r.realized_pnl)}</td><td>${fmt(r.sales)}</td><td>${fmt(r.fees)}</td><td>${r.trades}</td></tr>`).join("")}</table></div>
+  <table><tr><th>Mês</th><th>Mercado</th><th>Lucro realizado</th><th>Total vendido</th><th>Taxas</th><th>Ops</th></tr>${mo.map(r=>`<tr><td>${r.month}</td><td>${({us:"EUA",b3:"B3",main:"Cripto"})[r.market]||r.market}</td><td class="${cls(r.realized_pnl)}">${fmt(r.realized_pnl)}</td><td>${fmt(r.sales)}</td><td>${fmt(r.fees)}</td><td>${r.trades}</td></tr>`).join("")}</table></div>
   <div class="card space-y-2"><div class="font-semibold">Aportes e retiradas</div><div class="text-xs text-slate-500">Registre aqui quando depositar ou sacar da corretora, para o lucro ser calculado certo. Valor negativo = retirada.</div>
    <div class="flex gap-2"><input id="cfa" type="number" placeholder="valor"><input id="cfn" placeholder="observação"><button class="btn bg-slate-900 text-white" onclick="addCF()">Salvar</button></div>
    <table><tr><th>Data</th><th>Valor</th><th>Obs.</th></tr>${cf.map(c=>`<tr><td>${dt(c.ts)}</td><td class="${cls(c.amount)}">${fmt(c.amount)}</td><td>${c.note}</td></tr>`).join("")}</table></div>`}

@@ -157,6 +157,11 @@ def create_app(engine: Engine) -> FastAPI:
             "realized_pnl": realized["s"], "fees": realized["f"], "positions": positions,
             "settings": db.all_settings(), "last_cycle": engine.last_cycle, "last_error": engine.last_error,
             "markets": {k: b.name for k, b in engine.brokers.items()},
+            "by_market": [
+                {"market": m, "label": {"main": f"Cripto ({settings.quote_currency})", "us": "EUA (US$)",
+                                        "b3": "B3 (R$)"}.get(m, m),
+                 "equity": engine.market_equity(m)[0], "cash": engine.market_equity(m)[1]}
+                for m in engine.brokers],
             "pending": db.one("SELECT COUNT(*) c FROM signals WHERE status='pending'")["c"],
             "us_enabled": "us" in engine.brokers, "sec_ready": bool(settings.sec_user_agent),
         }

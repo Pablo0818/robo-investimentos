@@ -64,6 +64,13 @@ class Settings:
     alpaca_paper: bool = field(default_factory=lambda: _bool("ALPACA_PAPER", True))
     sec_user_agent: str = field(default_factory=lambda: _env("SEC_USER_AGENT"))
 
+    # B3 em simulação com preços reais (Yahoo, ~15 min de atraso). Dinheiro real exige MT5.
+    b3_enabled: bool = field(default_factory=lambda: _bool("B3_ENABLED", True))
+    b3_symbols: list[str] = field(
+        default_factory=lambda: [s.strip().upper() for s in _env("B3_SYMBOLS", "PETR4,VALE3,ITUB4,BBAS3,WEGE3").split(",") if s.strip()]
+    )
+    b3_initial_capital: float = field(default_factory=lambda: float(_env("B3_INITIAL_CAPITAL", "10000")))
+
     # Telegram
     telegram_token: str = field(default_factory=lambda: _env("TELEGRAM_BOT_TOKEN"))
     telegram_chat_id: str = field(default_factory=lambda: _env("TELEGRAM_CHAT_ID"))

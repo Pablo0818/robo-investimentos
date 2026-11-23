@@ -23,6 +23,8 @@ class Engine:
         self.brokers: dict[str, Broker] = {"main": broker}
         if us_broker is not None:
             self.brokers["us"] = us_broker
+        # mercados operados pelas estratégias automáticas: mercado -> ativos
+        self.strategy_markets: dict[str, list[str]] = {"main": list(cfg.symbols)}
         self.notify = notify or (lambda m: None)
         self.on_signal = on_signal or (lambda s: None)
         self.lock = threading.RLock()
@@ -47,6 +49,20 @@ class Engine:
             if symbol in self.prices:
                 return self.prices[symbol]
             raise
+
+    def add_strategy_market(self, market: str, broker: Broker, symbols: list[str]) -> None:
+        self.brokers[market] = broker
+        self.strategy_markets[market] = list(symbols)
+
+    def market_equity(self, market: str) -> tuple[float, float]:
+        """Patrimônio e caixa de UM mercado (cada mercado tem sua moeda e seu caixa)."""
+        try:
+            cash = self.broker(market).get_cash()
+        except Exception:
+            cash = 0.0
+        value = sum(p["qty"] * self.prices.get(p["symbol"], p["avg_price"])
+                    for p in db.query("SELECT * FROM positions WHERE market=?", (market,)))
+        return cash + value, cash
 
     def equity(self) -> tuple[float, float]:
         cash = 0.0
@@ -79,12 +95,13 @@ class Engine:
         with self.lock:
             try:
                 self._expire_signals()
-                for sym in self.cfg.symbols:
-                    try:
-                        self.process_symbol(sym)
-                    except Exception as e:
-                        db.log(f"{sym}: erro no ciclo: {e}", "ERROR")
-                for p in db.query("SELECT symbol, market FROM positions WHERE market!='main'"):
+                for market, syms in self.strategy_markets.items():
+                    for sym in syms:
+                        try:
+                            self.process_symbol(sym, market)
+                        except Exception as e:
+                            db.log(f"{sym}: erro no ciclo: {e}", "ERROR")
+                for p in db.query("SELECT symbol, market FROM positions WHERE market='us'"):
                     try:
                         self.price(p["symbol"], p["market"])
                     except Exception:
@@ -106,8 +123,8 @@ class Engine:
                 self.last_error = str(e)
                 db.log(f"Erro no ciclo: {e}\n{traceback.format_exc()}", "ERROR")
 
-    def process_symbol(self, sym: str) -> None:
-        b = self.broker("main")
+    def process_symbol(self, sym: str, market: str = "main") -> None:
+        b = self.broker(market)
         df = b.fetch_ohlcv(sym, self.cfg.timeframe, self.cfg.history_bars)
         if len(df) < 100:
             db.log(f"{sym}: histórico insuficiente ({len(df)} candles)", "WARN")
@@ -129,7 +146,7 @@ class Engine:
         want, prev = pos_arr[-1], pos_arr[-2]
         a = float(st.atr(df).iloc[-1])
         position = db.one("SELECT * FROM positions WHERE symbol=?", (sym,))
-        live_px = self.price(sym)
+        live_px = self.price(sym, market)
 
         if position:
             hi = max(position["highest"] or position["avg_price"], live_px)
@@ -143,12 +160,12 @@ class Engine:
                 self._exit_now(sym, "alvo de lucro atingido")
             elif want == 0:
                 self.create_signal(sym, "sell", position["qty"], live_px, 0, 0, champ["name"],
-                                   f"estratégia {champ['name']} mandou sair")
+                                   f"estratégia {champ['name']} mandou sair", market=market)
             return
 
         if want == 1 and prev == 0:
-            eq, cash = self.equity()
-            chk = risk.can_open(sym, eq, b.is_market_open(sym))
+            eq, cash = self.market_equity(market)
+            chk = risk.can_open(sym, eq, b.is_market_open(sym), market)
             if not chk.ok:
                 db.log(f"{sym}: sinal de compra ignorado ({chk.reason})")
                 return
@@ -159,7 +176,7 @@ class Engine:
                 db.log(f"{sym}: sinal de compra, mas o tamanho calculado é menor que o mínimo do ativo", "WARN")
                 return
             self.create_signal(sym, "buy", qty, live_px, stop, take, champ["name"],
-                               st.describe(champ["name"], champ["params"]))
+                               st.describe(champ["name"], champ["params"]), market=market)
 
     # -------------------------------------------------------------- sinais
     def create_signal(self, sym: str, side: str, qty: float, price: float, stop: float, take: float,
@@ -210,9 +227,9 @@ class Engine:
         try:
             px = self.price(sym, market)
             if side == "buy":
-                eq, cash = self.equity()
-                if market == "main":
-                    chk = risk.can_open(sym, eq, b.is_market_open(sym))
+                eq, cash = self.market_equity(market)
+                if market in self.strategy_markets:
+                    chk = risk.can_open(sym, eq, b.is_market_open(sym), market)
                     if not chk.ok:
                         raise RuntimeError(chk.reason)
                     dist = sig["price"] - sig["stop"]
@@ -304,13 +321,14 @@ class Engine:
     def evolve_all(self) -> list[dict]:
         out = []
         db.set_setting("last_evolve", db.now())
-        for sym in self.cfg.symbols:
-            try:
-                df = self.broker("main").fetch_ohlcv(sym, self.cfg.timeframe, self.cfg.history_bars)
-                r = evolution.run_for_symbol(sym, df, self.cfg, self.notify)
-                out.append({"symbol": sym, "promoted": r.get("promote"), "best": r.get("best")})
-            except Exception as e:
-                db.log(f"Evolução {sym} falhou: {e}", "ERROR")
+        for market, syms in self.strategy_markets.items():
+            for sym in syms:
+                try:
+                    df = self.broker(market).fetch_ohlcv(sym, self.cfg.timeframe, self.cfg.history_bars)
+                    r = evolution.run_for_symbol(sym, df, self.cfg, self.notify)
+                    out.append({"symbol": sym, "promoted": r.get("promote"), "best": r.get("best")})
+                except Exception as e:
+                    db.log(f"Evolução {sym} falhou: {e}", "ERROR")
         return out
 
     def promote(self, strategy_id: int) -> str:
