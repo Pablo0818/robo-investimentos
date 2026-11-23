@@ -7,7 +7,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -92,6 +92,20 @@ def create_app(engine: Engine) -> FastAPI:
         if not u:
             return RedirectResponse("/login")
         return FileResponse(WEB / "index.html", headers={"Cache-Control": "no-store"})
+
+    @app.get("/aovivo")
+    def aovivo_page(request: Request):
+        if not auth.user_for(request.cookies.get(auth.COOKIE)):
+            return RedirectResponse("/login")
+        return FileResponse(WEB / "aovivo.html", headers={"Cache-Control": "no-store"})
+
+    @app.get("/aovivo.webmanifest")
+    def aovivo_manifest():
+        return JSONResponse({"name": "Robô Ao Vivo", "short_name": "Ao Vivo", "start_url": "/aovivo",
+                             "scope": "/", "display": "standalone", "background_color": "#0a0f1c",
+                             "theme_color": "#0a0f1c",
+                             "icons": [{"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png"}]},
+                            media_type="application/manifest+json")
 
     @app.get("/login")
     def login_page():
@@ -185,6 +199,35 @@ def create_app(engine: Engine) -> FastAPI:
                 "by_market": [x for x in out["by_market"] if x["market"] in live],
             })
         return out
+
+    @app.get("/api/aovivo", dependencies=protected)
+    def aovivo():
+        """Tela ao vivo do iPhone: dinheiro real, posições, últimas operações e qual gráfico mostrar."""
+        live = engine.live_markets()
+        markets = live or ["main"]
+        ph = ",".join("?" * len(markets))
+        eq, cash = engine.live_equity() if live else engine.market_equity("main")
+        pos = db.query(f"SELECT * FROM positions WHERE market IN ({ph}) ORDER BY opened_ts DESC", tuple(markets))
+        for p in pos:
+            px = engine.prices.get(p["symbol"], p["avg_price"])
+            p.update(price=px, pnl=(px - p["avg_price"]) * p["qty"],
+                     pnl_pct=px / p["avg_price"] - 1 if p["avg_price"] else 0)
+        trades = db.query(f"SELECT id, ts, symbol, side, qty, price, pnl, fee, market FROM trades "
+                          f"WHERE market IN ({ph}) ORDER BY id DESC LIMIT 30", tuple(markets))
+        realized = db.one(f"SELECT COALESCE(SUM(pnl),0) s FROM trades WHERE market IN ({ph})", tuple(markets))["s"]
+        first = db.one("SELECT equity FROM equity_live WHERE equity>0 ORDER BY ts LIMIT 1") if live else None
+        day = db.get_setting(f"live_day:{live[0]}").partition("|")[2] if live else ""
+        syms = []
+        for x in [p["symbol"] for p in pos] + [t["symbol"] for t in trades] + \
+                 [y for m in markets for y in engine.symbols_for(m)]:
+            if x not in syms:
+                syms.append(x)
+        states = [dict(v, market=k[0], symbol=k[1]) for k, v in engine.state.items() if k[0] in markets]
+        return {"live": bool(live), "market": markets[0], "equity": eq, "cash": cash,
+                "profit": eq - float(first["equity"]) if first else realized,
+                "day": eq - float(day) if day else 0.0, "realized": realized,
+                "positions": pos, "trades": trades, "symbols": syms, "states": states,
+                "last_cycle": engine.last_cycle}
 
     @app.get("/api/signals", dependencies=protected)
     def signals(status: str = "", limit: int = 100):

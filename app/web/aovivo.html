@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0a0f1c">
+<link rel="manifest" href="/aovivo.webmanifest">
+<link rel="apple-touch-icon" href="/static/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Ao Vivo">
+<title>Robô · Ao vivo</title>
+<script src="/static/lwc.js"></script>
+<style>
+  :root{--bg:#0a0f1c;--panel:#111827;--panel2:#162033;--line:#1f2a3d;--muted:#8b97ad;--txt:#e6ebf5;--up:#22c55e;--down:#ef4444;--acc:#38bdf8}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;background:var(--bg);color:var(--txt);font-family:-apple-system,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  body{padding:calc(env(safe-area-inset-top) + 10px) 12px calc(env(safe-area-inset-bottom) + 16px)}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .muted{color:var(--muted)} .up{color:var(--up)} .down{color:var(--down)}
+  .num{font-variant-numeric:tabular-nums}
+  .live{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;letter-spacing:.06em}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--down);animation:pulse 1.4s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(239,68,68,.7)}70%{box-shadow:0 0 0 8px rgba(239,68,68,0)}100%{box-shadow:0 0 0 0 rgba(239,68,68,0)}}
+  .big{font-size:34px;font-weight:800;letter-spacing:-.03em}
+  .kpis{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+  .k{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:10px}
+  .k .v{font-size:18px;font-weight:700}
+  .k .l{font-size:11px;color:var(--muted)}
+  .chips{display:flex;gap:6px;overflow-x:auto;padding:10px 0 6px;scrollbar-width:none}
+  .chips::-webkit-scrollbar{display:none}
+  .chip{flex:none;border:1px solid var(--line);background:var(--panel);color:var(--txt);border-radius:999px;padding:6px 12px;font-size:13px;font-weight:600}
+  .chip.on{background:var(--acc);color:#04121f;border-color:var(--acc)}
+  #chart{height:46vh;min-height:260px;border-radius:14px;overflow:hidden;border:1px solid var(--line)}
+  .agent{margin-top:8px;font-size:13px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:9px 11px}
+  .pos{margin-top:8px;background:var(--panel2);border-radius:12px;padding:10px 11px;font-size:13px}
+  h3{font-size:14px;margin:16px 0 6px}
+  .t{display:flex;justify-content:space-between;padding:9px 2px;border-bottom:1px solid var(--line);font-size:13px}
+  .flash{position:fixed;left:12px;right:12px;top:calc(env(safe-area-inset-top) + 8px);z-index:9;border-radius:14px;padding:14px;font-weight:700;
+    font-size:16px;text-align:center;transform:translateY(-140%);transition:transform .35s}
+  .flash.show{transform:none}
+  .btn{border:1px solid var(--line);background:var(--panel);color:var(--txt);border-radius:10px;padding:6px 10px;font-size:12px;font-weight:600}
+  a{color:var(--acc);text-decoration:none}
+</style>
+</head>
+<body>
+<div id="flash" class="flash"></div>
+<div class="row">
+  <span class="live"><span class="dot"></span><span id="mode">AO VIVO</span></span>
+  <span class="row" style="gap:6px"><button class="btn" id="wake">🔆 Tela acesa</button><a class="btn" href="/">Painel</a></span>
+</div>
+<div class="muted" style="font-size:12px;margin-top:10px" id="lbl">Saldo</div>
+<div class="big num" id="eq">—</div>
+<div class="kpis">
+  <div class="k"><div class="l">Hoje</div><div class="v num" id="day">—</div></div>
+  <div class="k"><div class="l">Lucro total</div><div class="v num" id="profit">—</div></div>
+</div>
+<div class="chips" id="chips"></div>
+<div id="chart"></div>
+<div class="agent" id="agent">Carregando…</div>
+<div id="pos"></div>
+<h3>Cada compra e venda</h3>
+<div id="trades" class="muted" style="font-size:13px">Nenhuma operação ainda.</div>
+<div class="muted" style="font-size:11px;margin-top:14px" id="upd"></div>
+
+<script>
+const $=s=>document.querySelector(s);
+const brl=v=>(v||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+const px=v=>v>=100?brl(v):(v||0).toLocaleString("pt-BR",{maximumSignificantDigits:6});
+const sg=v=>(v>0?"+":"")+brl(v);
+const cls=v=>v>0?"up":v<0?"down":"";
+const hm=ts=>new Date(ts.endsWith("Z")||ts.includes("+")?ts:ts+"Z").toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
+let D=null, sel=localStorage.getItem("aovivo_sym")||"", lastTradeId=+(localStorage.getItem("aovivo_last")||0), chart, cs, ema, lines=[];
+
+async function api(u){const r=await fetch(u,{credentials:"same-origin"});if(r.status==401){location="/login";throw 0}if(!r.ok)throw new Error(await r.text());return r.json()}
+
+function flash(t){const f=$("#flash");const buy=t.side=="buy";
+  f.style.background=buy?"var(--up)":"var(--down)";f.style.color="#fff";
+  f.innerHTML=`${buy?"🟢 COMPROU":"🔴 VENDEU"} ${t.symbol}<div style="font-size:13px;font-weight:600;margin-top:4px">${px(t.price)}${!buy&&t.pnl!=null?` · resultado ${sg(t.pnl)}`:""}</div>`;
+  f.classList.add("show");if(navigator.vibrate)navigator.vibrate(200);setTimeout(()=>f.classList.remove("show"),6000)}
+
+function mkChart(){const el=$("#chart");
+  chart=LightweightCharts.createChart(el,{width:el.clientWidth,height:el.clientHeight,layout:{background:{color:"#111827"},textColor:"#8b97ad",fontSize:11},
+    grid:{vertLines:{color:"#1a2436"},horzLines:{color:"#1a2436"}},rightPriceScale:{borderColor:"#1f2a3d"},
+    timeScale:{borderColor:"#1f2a3d",timeVisible:true,secondsVisible:false},localization:{locale:"pt-BR"},handleScale:{axisPressedMouseMove:true}});
+  cs=chart.addCandlestickSeries({upColor:"#22c55e",downColor:"#ef4444",wickUpColor:"#22c55e",wickDownColor:"#ef4444",borderVisible:false});
+  ema=chart.addLineSeries({color:"#38bdf8",lineWidth:1,priceLineVisible:false,lastValueVisible:false});
+  addEventListener("resize",()=>chart.applyOptions({width:el.clientWidth,height:el.clientHeight}))}
+
+async function drawChart(fit){if(!sel)return;
+  let d;try{d=await api(`/api/market/candles?symbol=${encodeURIComponent(sel)}&market=${D.market}`)}catch(e){$("#agent").textContent="Ainda sem gráfico para "+sel+" (o robô está coletando os candles).";return}
+  cs.setData(d.bars);ema.setData(d.ema);
+  const times=d.bars.map(b=>b.time);const near=ts=>{const t=Date.parse(ts.endsWith("Z")||ts.includes("+")?ts:ts+"Z")/1000;let best=times[0];for(const x of times){if(x<=t)best=x}return best};
+  cs.setMarkers(d.trades.filter(t=>Date.parse(t.ts.endsWith("Z")||t.ts.includes("+")?t.ts:t.ts+"Z")/1000>=times[0]).map(t=>({time:near(t.ts),
+    position:t.side=="buy"?"belowBar":"aboveBar",color:t.side=="buy"?"#22c55e":"#ef4444",shape:t.side=="buy"?"arrowUp":"arrowDown",
+    text:t.side=="buy"?"COMPRA "+px(t.price):"VENDA "+px(t.price)+(t.pnl!=null?" ("+sg(t.pnl)+")":"")})));
+  lines.forEach(l=>cs.removePriceLine(l));lines=[];
+  if(d.position){const p=d.position;
+    lines.push(cs.createPriceLine({price:p.avg_price,color:"#e6ebf5",lineWidth:1,lineStyle:2,title:"compra"}));
+    if(p.stop)lines.push(cs.createPriceLine({price:p.stop,color:"#ef4444",lineWidth:1,lineStyle:2,title:"stop"}));
+    if(p.take)lines.push(cs.createPriceLine({price:p.take,color:"#22c55e",lineWidth:1,lineStyle:2,title:"alvo"}))}
+  if(fit)chart.timeScale().scrollToRealTime()}
+
+function render(){
+  $("#mode").textContent=D.live?"AO VIVO · DINHEIRO REAL":"AO VIVO · SIMULAÇÃO";
+  $("#lbl").textContent=D.live?"💰 Saldo real (R$)":"Saldo da simulação";
+  $("#eq").textContent=brl(D.equity);
+  $("#day").innerHTML=`<span class="${cls(D.day)}">${sg(D.day)}</span>`;
+  $("#profit").innerHTML=`<span class="${cls(D.profit)}">${sg(D.profit)}</span>`;
+  const open=new Set(D.positions.map(p=>p.symbol));
+  if(!sel||!D.symbols.includes(sel))sel=D.positions[0]?.symbol||D.trades[0]?.symbol||D.symbols[0]||"";
+  $("#chips").innerHTML=D.symbols.map(s=>`<button class="chip ${s==sel?"on":""}" data-s="${s}">${open.has(s)?"🟢 ":""}${s.replace("/BRL","").replace("/USDT","")}</button>`).join("");
+  document.querySelectorAll(".chip").forEach(b=>b.onclick=()=>{sel=b.dataset.s;localStorage.setItem("aovivo_sym",sel);render();drawChart(true)});
+  const st=D.states.find(x=>x.symbol==sel);
+  $("#agent").innerHTML=st?`🤖 <b>${sel}</b> · ${st.status}<div class="muted" style="margin-top:3px">${st.detail||""}</div>`:`🤖 <b>${sel}</b> · aguardando o próximo ciclo`;
+  const p=D.positions.find(x=>x.symbol==sel);
+  $("#pos").innerHTML=p?`<div class="pos"><div class="row"><b>Comprado</b><b class="${cls(p.pnl)}">${sg(p.pnl)} (${(p.pnl_pct*100).toFixed(2)}%)</b></div>
+    <div class="muted" style="margin-top:4px">entrada ${px(p.avg_price)} · agora ${px(p.price)} · stop ${px(p.stop)}${p.take?" · alvo "+px(p.take):""}</div></div>`:"";
+  $("#trades").innerHTML=D.trades.length?D.trades.map(t=>`<div class="t" data-s="${t.symbol}"><span>${t.side=="buy"?"🟢 Compra":"🔴 Venda"} <b>${t.symbol.replace("/BRL","")}</b><div class="muted" style="font-size:11px">${hm(t.ts)} · ${px(t.price)}</div></span>
+    <span class="num ${cls(t.pnl)}" style="text-align:right">${t.side=="sell"&&t.pnl!=null?sg(t.pnl):brl(t.qty*t.price)}</span></div>`).join(""):"Nenhuma operação ainda. Quando o robô comprar ou vender, aparece aqui e o gráfico pula para a moeda.";
+  document.querySelectorAll(".t").forEach(r=>r.onclick=()=>{sel=r.dataset.s;render();drawChart(true);scrollTo({top:0,behavior:"smooth"})});
+  $("#upd").textContent="Atualiza sozinho a cada 10 s · último ciclo do robô: "+(D.last_cycle?hm(D.last_cycle):"—")}
+
+async function tick(first){
+  try{D=await api("/api/aovivo")}catch(e){$("#upd").textContent="Sem conexão com o robô, tentando de novo…";return}
+  const newest=D.trades[0];
+  if(newest&&newest.id>lastTradeId){if(!first){flash(newest);sel=newest.symbol}lastTradeId=newest.id;localStorage.setItem("aovivo_last",lastTradeId)}
+  render();await drawChart(first)}
+
+let lock=null;
+$("#wake").onclick=async()=>{try{if(lock){await lock.release();lock=null;$("#wake").textContent="🔆 Tela acesa";return}
+  lock=await navigator.wakeLock.request("screen");$("#wake").textContent="✅ Tela fica acesa";
+  lock.addEventListener("release",()=>{lock=null;$("#wake").textContent="🔆 Tela acesa"})}catch(e){alert("Este iPhone não deixou manter a tela acesa por aqui. Use Ajustes › Tela e Brilho › Bloqueio Automático › Nunca.")}};
+document.addEventListener("visibilitychange",async()=>{if(document.visibilityState=="visible"){tick(false);if($("#wake").textContent.startsWith("✅")&&!lock){try{lock=await navigator.wakeLock.request("screen")}catch(e){}}}});
+
+mkChart();tick(true);setInterval(()=>tick(false),10000);
+</script>
+</body>
+</html>
