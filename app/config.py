@@ -110,7 +110,7 @@ DEFAULT_RUNTIME = {
     "evolve_max_per_cycle": "50",  # quantos ativos testar por ciclo (sem limite prático)
     "strategy_style": "baixa",   # baixa = comprar na queda e vender na alta | tendencia | todas
     "timeframe": "",
-    "crypto_symbols": "",
+    "crypto_symbols": "", "b3_symbols": "",
     # Pesquisa EUA (trader-skill)
     "us_cash_buffer_pct": "10",
     "us_max_position_pct": "25",
@@ -134,9 +134,9 @@ settings = Settings()
 # descontadas as taxas, então mais operações só acontecem se compensarem.
 PROFILES = {
     "normal": {
-        "timeframe": "", "crypto_symbols": "", "max_positions": "4", "risk_per_trade": "0.01",
+        "timeframe": "", "crypto_symbols": "", "b3_symbols": "", "max_positions": "4", "risk_per_trade": "0.01",
         "max_position_pct": "0.25", "atr_stop_mult": "2.0", "take_profit_r": "3.0",
-        "signal_ttl_minutes": "60", "evolve_every_hours": "24",
+        "signal_ttl_minutes": "60", "evolve_every_hours": "24", "max_daily_loss_pct": "0.03",
     },
     "metralhadora": {
         "timeframe": "15m",
@@ -147,5 +147,22 @@ PROFILES = {
         "evolve_every_hours": "2", "auto_evolve": "true", "reinvest_profits": "true",
         "strategy_style": "baixa", "us_max_position_pct": "15", "us_max_orders_per_day": "30",
         "us_max_order_usd": "1000", "us_alerts_minutes": "1", "us_news_minutes": "15",
+        "b3_symbols": "", "max_daily_loss_pct": "0.03",
+    },
+    # Turbo: mais ativos (mais oportunidades por dia) e risco dobrado por operação.
+    # Ganha e perde o dobro por trade; a trava de 15% desde o topo continua valendo.
+    "turbo": {
+        "timeframe": "15m",
+        "crypto_symbols": "BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,XRP/USDT,DOGE/USDT,ADA/USDT,AVAX/USDT,"
+                          "LINK/USDT,TRX/USDT,LTC/USDT,DOT/USDT,BCH/USDT,NEAR/USDT,ATOM/USDT,UNI/USDT,"
+                          "ETC/USDT,FIL/USDT,APT/USDT,ARB/USDT,OP/USDT,INJ/USDT,SUI/USDT,AAVE/USDT",
+        "b3_symbols": "PETR4,VALE3,ITUB4,BBAS3,WEGE3,BBDC4,ABEV3,B3SA3,PRIO3,RENT3,SUZB3,ELET3,"
+                      "GGBR4,RADL3,EQTL3,LREN3,MGLU3,CSAN3,EMBR3,BPAC11",
+        "max_positions": "10", "risk_per_trade": "0.02", "max_position_pct": "0.20",
+        "atr_stop_mult": "1.5", "take_profit_r": "2.0", "signal_ttl_minutes": "15",
+        "evolve_every_hours": "2", "auto_evolve": "true", "reinvest_profits": "true",
+        "strategy_style": "baixa", "max_daily_loss_pct": "0.06",
+        "us_max_position_pct": "20", "us_max_orders_per_day": "50",
+        "us_max_order_usd": "1500", "us_alerts_minutes": "1", "us_news_minutes": "15",
     },
 }

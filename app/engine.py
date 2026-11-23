@@ -69,6 +69,10 @@ class Engine:
             custom = [x.strip() for x in db.get_setting("crypto_symbols").split(",") if x.strip()]
             if custom and self.cfg.broker == "crypto":
                 return custom
+        if market == "b3":
+            custom = [x.strip().upper() for x in db.get_setting("b3_symbols").split(",") if x.strip()]
+            if custom and market in self.strategy_markets:
+                return custom
         return self.strategy_markets.get(market, [])
 
     def apply_profile(self, name: str) -> str:

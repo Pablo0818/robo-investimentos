@@ -165,6 +165,18 @@ def test_profile_metralhadora(fresh_db, monkeypatch):
     assert e.symbols_for("main") == list(settings.symbols)
 
 
+def test_profile_turbo(fresh_db, monkeypatch):
+    monkeypatch.setattr(settings, "broker", "crypto")
+    e = _engine()
+    e.add_strategy_market("b3", e.broker, ["PETR4"])
+    e.apply_profile("turbo")
+    assert len(e.symbols_for("main")) == 24 and len(e.symbols_for("b3")) == 20
+    assert fresh_db.get_setting("risk_per_trade") == "0.02"
+    e.apply_profile("normal")
+    assert e.symbols_for("b3") == ["PETR4"]
+    assert fresh_db.get_setting("max_daily_loss_pct") == "0.03"
+
+
 def test_performance_weight(fresh_db):
     assert risk.performance_weight("X") == 1.0
     for pnl in (5, 4, 3, 6, -1):

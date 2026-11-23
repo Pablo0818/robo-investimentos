@@ -83,7 +83,7 @@ function spark(vals,w=90,h=28){if(!vals||vals.length<2)return"";const mn=Math.mi
   return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><polyline fill="none" stroke="${c}" stroke-width="1.8" points="${pts}"/></svg>`}
 
 async function load(){S=await api("/api/status");const st=S.settings;
-  $("#sub").textContent=`${S.trading_mode=="live"?"● DINHEIRO REAL":"● Simulação"} · ${st.execution_mode=="auto"?"Automático":"Manual"}${S.profile=="metralhadora"?" · ⚡ Metralhadora":""} · ${dt(S.last_cycle)}`;
+  $("#sub").textContent=`${S.trading_mode=="live"?"● DINHEIRO REAL":"● Simulação"} · ${st.execution_mode=="auto"?"Automático":"Manual"}${S.profile=="metralhadora"?" · ⚡ Metralhadora":S.profile=="turbo"?" · 🚀 Turbo":""} · ${dt(S.last_cycle)}`;
   let b="";
   if(S.trading_mode=="live")b+=`<div class="text-center text-sm py-1 text-white" style="background:var(--down)">⚠️ MODO REAL: as ordens usam seu dinheiro</div>`;
   if(st.kill_switch=="true")b+=`<div class="text-center text-sm py-1 text-white" style="background:#7f1d1d">🛑 Trava de segurança ligada: nenhuma compra nova. Destrave em Ajustes.</div>`;
@@ -301,7 +301,8 @@ async function settings(m){const st=S.settings;const pr=S.profile||"normal";
   m.innerHTML=`<div class="card space-y-3"><div class="font-semibold">Perfil de operação</div>
   <div class="grid grid-cols-2 gap-2">
    <button class="rounded-xl p-3 text-left ${pr=="normal"?"glow":""}" style="background:var(--panel2)" onclick="setProfile('normal')"><div class="font-semibold">🎯 Normal</div><div class="text-xs muted mt-1">Gráfico de 1h · 3 criptos · menos operações, mais seletivo</div></button>
-   <button class="rounded-xl p-3 text-left ${pr=="metralhadora"?"glow":""}" style="background:var(--panel2)" onclick="setProfile('metralhadora')"><div class="font-semibold">⚡ Metralhadora</div><div class="text-xs muted mt-1">Gráfico de 15 min · 12 criptos + B3 · até 8 posições juntas · várias operações por dia</div></button></div>
+   <button class="rounded-xl p-3 text-left ${pr=="metralhadora"?"glow":""}" style="background:var(--panel2)" onclick="setProfile('metralhadora')"><div class="font-semibold">⚡ Metralhadora</div><div class="text-xs muted mt-1">Gráfico de 15 min · 12 criptos + B3 · até 8 posições juntas · várias operações por dia</div></button>
+   <button class="col-span-2 rounded-xl p-3 text-left ${pr=="turbo"?"glow":""}" style="background:var(--panel2)" onclick="setProfile('turbo')"><div class="font-semibold">🚀 Turbo</div><div class="text-xs muted mt-1">24 criptos + 20 ações da B3 · até 10 posições por mercado · risco de 2% por operação (ganha e perde o dobro)</div></button></div>
   <div class="text-xs muted">Agora: <b style="color:var(--txt)">${pr}</b> · gráfico ${S.timeframe} · ${S.n_symbols} ativos. Em qualquer perfil, o robô só usa estratégias que deram lucro já descontando as taxas.</div></div>
   <div class="card space-y-3"><div class="font-semibold">Ajustes</div>
   <div class="text-xs rounded-xl p-3" style="background:rgba(245,158,11,.1);color:#fcd34d">No <b>modo automático</b> o robô compra e vende sozinho, dentro dos limites abaixo. Stops de proteção são executados na hora em qualquer modo.</div>
@@ -311,7 +312,7 @@ async function settings(m){const st=S.settings;const pr=S.profile||"normal";
 async function saveSettings(){const v={};document.querySelectorAll("[data-k]").forEach(e=>v[e.dataset.k]=e.value);
   let confirm="";if(v.execution_mode=="auto"&&S.settings.execution_mode!="auto"){confirm=prompt("O robô vai operar SOZINHO. Digite CONFIRMO:")||"";if(confirm.toUpperCase()!="CONFIRMO")return}
   try{await post("/api/settings",{values:v,confirm});toast("Salvo")}catch(e){toast(e.message)}render()}
-async function setProfile(n){if(!confirm(n=="metralhadora"?"Ativar o modo Metralhadora? O robô vai reaprender as estratégias no gráfico de 15 min com 12 criptos.":"Voltar ao perfil Normal?"))return;try{toast((await post("/api/profile",{name:n})).message)}catch(e){toast(e.message)}render()}
+async function setProfile(n){if(!confirm(n=="metralhadora"?"Ativar o modo Metralhadora? O robô vai reaprender as estratégias no gráfico de 15 min com 12 criptos.":n=="turbo"?"Ativar o Turbo? 24 criptos + 20 ações da B3 e risco de 2% por operação: ganha e perde o dobro por operação.":"Voltar ao perfil Normal?"))return;try{toast((await post("/api/profile",{name:n})).message)}catch(e){toast(e.message)}render()}
 async function unlock(){const c=prompt("Digite CONFIRMO para destravar:");try{await post("/api/settings",{values:{kill_switch:"false"},confirm:c||""});toast("Destravado")}catch(e){toast(e.message)}render()}
 async function togglePause(){await post("/api/settings",{values:{paused:S.settings.paused=="true"?"false":"true"}});render()}
 async function panic(){if(!confirm("Ligar a trava de segurança? O robô para de abrir posições (stops continuam ativos)."))return;await post("/api/settings",{values:{kill_switch:"true"}});render()}

@@ -41,9 +41,9 @@ def build():
         db.set_setting("style_v", "2")
         db.log("Estilo 'comprar na baixa, vender na alta' ativado: reaprendendo as estratégias")
     # ajuste v1 (pedido do usuário): liga o perfil Metralhadora com todos os parâmetros
-    if db.get_setting("params_v") != "1":
-        engine.apply_profile("metralhadora")
-        db.set_setting("params_v", "1")
+    if db.get_setting("params_v") != "2":
+        engine.apply_profile("turbo")
+        db.set_setting("params_v", "2")
     if us is not None:
         research.attach(engine)
     if settings.broker == "crypto":
