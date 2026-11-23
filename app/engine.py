@@ -275,7 +275,7 @@ class Engine:
                 self._st(market, sym, "bloqueado", chk.reason, champ["name"])
                 return
             from . import news_agent
-            veto = news_agent.blocks_buy(sym) if market == "main" else None
+            veto = news_agent.blocks_buy(sym) if market in ("main", "real") else None
             if veto:
                 db.log(f"{sym}: compra vetada pelo agente de notícias ({veto})")
                 self._st(market, sym, "bloqueado", veto, champ["name"])

@@ -53,13 +53,18 @@ class CryptoBroker(Broker):
         return True
 
     def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
+        n = min(limit + 1, 720)
         while True:
             try:
-                raw = self.ex.fetch_ohlcv(symbol, timeframe=timeframe, limit=min(limit + 1, 720))
+                raw = self.ex.fetch_ohlcv(symbol, timeframe=timeframe, limit=n)
                 break
             except Exception as e:
-                if not self._switch_source(e):
-                    raise
+                if self._switch_source(e):
+                    continue
+                if n > 300:  # algumas corretoras (ex.: Foxbit) aceitam menos candles por pedido
+                    n = 500 if n > 500 else 300
+                    continue
+                raise
         df = pd.DataFrame(raw, columns=["ts", "open", "high", "low", "close", "volume"])
         df["ts"] = pd.to_datetime(df["ts"], unit="ms", utc=True)
         return df.iloc[:-1].reset_index(drop=True)  # remove o candle ainda em formação
