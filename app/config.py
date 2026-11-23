@@ -144,7 +144,8 @@ PROFILES = {
                           "LINK/USDT,TRX/USDT,LTC/USDT,DOT/USDT",
         "max_positions": "8", "risk_per_trade": "0.01", "max_position_pct": "0.15",
         "atr_stop_mult": "1.5", "take_profit_r": "2.0", "signal_ttl_minutes": "15",
-        "evolve_every_hours": "6", "auto_evolve": "true", "reinvest_profits": "true",
-        "strategy_style": "baixa",
+        "evolve_every_hours": "2", "auto_evolve": "true", "reinvest_profits": "true",
+        "strategy_style": "baixa", "us_max_position_pct": "15", "us_max_orders_per_day": "30",
+        "us_max_order_usd": "1000", "us_alerts_minutes": "1", "us_news_minutes": "15",
     },
 }
