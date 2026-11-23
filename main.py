@@ -29,6 +29,10 @@ def build():
     except Exception as e:
         db.log(f"Bolsa dos EUA desativada: {e}", "WARN")
     engine = Engine(settings, broker, notify=notify, on_signal=telegram.send_signal, us_broker=us)
+    if db.get_setting("evolve_v") != "3":  # sem limite de testes por ciclo (pedido do usuário)
+        db.set_setting("evolve_max_per_cycle", "50")
+        db.set_setting("evolve_retry_minutes", "1")
+        db.set_setting("evolve_v", "3")
     # migração v2: novo estilo "comprar na baixa, vender na alta" -> reaprender estratégias
     if db.get_setting("style_v") != "2":
         db.set_setting("strategy_style", "baixa")

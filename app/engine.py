@@ -189,7 +189,7 @@ class Engine:
             wait = timedelta(minutes=max(db.get_float("evolve_retry_minutes"), sem / per) - 0.1)
             if (last and datetime.now(timezone.utc) - datetime.fromisoformat(last) < wait) or \
                     self._evolved_this_cycle >= int(db.get_float("evolve_max_per_cycle")):
-                self._st(market, sym, "sem estratégia", "testando estratégias (revezando 2 ativos por minuto)")
+                self._st(market, sym, "sem estratégia", "testando estratégias a cada minuto")
                 return
             self._evolved_this_cycle += 1
             db.set_setting(key, db.now())
