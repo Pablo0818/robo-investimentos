@@ -136,11 +136,11 @@ def evolve(df: pd.DataFrame, *, timeframe: str = "1h", fee: float = 0.001, slipp
     return {"best": best, "champion_eval": champ_eval, "promote": promote, "buy_hold_oos": hold, "split": split}
 
 
-def run_for_symbol(symbol: str, df: pd.DataFrame, cfg, notify=None) -> dict:
+def run_for_symbol(symbol: str, df: pd.DataFrame, cfg, notify=None, timeframe: str | None = None) -> dict:
     """Roda a evolução para um ativo e grava o resultado no banco."""
     champ_row = db.one("SELECT * FROM strategies WHERE symbol=? AND status='champion'", (symbol,))
     champion = {"name": champ_row["name"], "params": json.loads(champ_row["params"])} if champ_row else None
-    res = evolve(df, timeframe=cfg.timeframe, fee=cfg.fee_rate, slippage=cfg.slippage,
+    res = evolve(df, timeframe=timeframe or cfg.timeframe, fee=cfg.fee_rate, slippage=cfg.slippage,
                  atr_mult=db.get_float("atr_stop_mult"), take_r=db.get_float("take_profit_r"),
                  trailing=db.get_bool("trailing_stop"), max_dd=db.get_float("max_drawdown_pct"),
                  champion=champion)

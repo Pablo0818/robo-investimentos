@@ -33,9 +33,9 @@ def _equity_drawdown() -> float:
 
 def _market_drop(engine, since: datetime | None) -> tuple[float, str]:
     worst, sym_w = 0.0, ""
-    for sym in engine.cfg.symbols:
+    for sym in engine.symbols_for("main"):
         try:
-            df = engine.broker("main").fetch_ohlcv(sym, engine.cfg.timeframe, engine.cfg.history_bars)
+            df = engine.broker("main").fetch_ohlcv(sym, engine.timeframe, engine.cfg.history_bars)
             if since is not None:
                 df = df[pd.to_datetime(df["ts"], utc=True) >= pd.Timestamp(since)]
             if len(df) < 2:

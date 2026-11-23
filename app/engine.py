@@ -58,6 +58,34 @@ class Engine:
         self.brokers[market] = broker
         self.strategy_markets[market] = list(symbols)
 
+    @property
+    def timeframe(self) -> str:
+        return db.get_setting("timeframe") or self.cfg.timeframe
+
+    def symbols_for(self, market: str) -> list[str]:
+        if market == "main":
+            custom = [x.strip() for x in db.get_setting("crypto_symbols").split(",") if x.strip()]
+            if custom and self.cfg.broker == "crypto":
+                return custom
+        return self.strategy_markets.get(market, [])
+
+    def apply_profile(self, name: str) -> str:
+        """Aplica um perfil pronto e força as estratégias a reaprenderem no novo ritmo."""
+        from .config import PROFILES
+
+        prof = PROFILES[name]
+        with self.lock:
+            for k, v in prof.items():
+                db.set_setting(k, v)
+            db.set_setting("profile", name)
+            db.execute("UPDATE strategies SET status='retired' WHERE status IN ('champion','proposed')")
+            db.execute("DELETE FROM settings WHERE key LIKE 'evolve_try:%'")
+            db.set_setting("last_evolve", db.now())
+            self.candles.clear()
+        db.log(f"Perfil '{name}' ativado: gráfico {self.timeframe}, {len(self.symbols_for('main'))} criptos, "
+               f"até {prof['max_positions']} posições por mercado. Estratégias vão reaprender.")
+        return f"Perfil {name} ativado. O robô vai reaprender as estratégias nos próximos minutos."
+
     def money_mode(self, market: str) -> str:
         """'paper' = dinheiro fictício (simulação/testnet/conta demo) | 'live' = dinheiro real."""
         b = self.brokers.get(market)
@@ -106,8 +134,8 @@ class Engine:
         with self.lock:
             try:
                 self._expire_signals()
-                for market, syms in self.strategy_markets.items():
-                    for sym in syms:
+                for market in self.strategy_markets:
+                    for sym in self.symbols_for(market):
                         try:
                             self.process_symbol(sym, market)
                         except Exception as e:
@@ -138,7 +166,7 @@ class Engine:
 
     def process_symbol(self, sym: str, market: str = "main") -> None:
         b = self.broker(market)
-        df = b.fetch_ohlcv(sym, self.cfg.timeframe, self.cfg.history_bars)
+        df = b.fetch_ohlcv(sym, self.timeframe, self.cfg.history_bars)
         if len(df) < 100:
             db.log(f"{sym}: histórico insuficiente ({len(df)} candles)", "WARN")
             return
@@ -152,7 +180,7 @@ class Engine:
                 return  # tenta de novo a cada 6h
             db.set_setting(key, db.now())
             db.log(f"{sym}: sem estratégia aprovada ainda, rodando evolução...")
-            evolution.run_for_symbol(sym, df, self.cfg, self.notify)
+            evolution.run_for_symbol(sym, df, self.cfg, self.notify, self.timeframe)
             champ = self.champion(sym)
             if champ is None:
                 return
@@ -182,6 +210,11 @@ class Engine:
             chk = risk.can_open(sym, eq, b.is_market_open(sym), market)
             if not chk.ok:
                 db.log(f"{sym}: sinal de compra ignorado ({chk.reason})")
+                return
+            from . import news_agent
+            veto = news_agent.blocks_buy(sym) if market == "main" else None
+            if veto:
+                db.log(f"{sym}: compra vetada pelo agente de notícias ({veto})")
                 return
             stop = live_px - db.get_float("atr_stop_mult") * a
             take = live_px + db.get_float("take_profit_r") * (live_px - stop)
@@ -348,11 +381,11 @@ class Engine:
     def evolve_all(self) -> list[dict]:
         out = []
         db.set_setting("last_evolve", db.now())
-        for market, syms in self.strategy_markets.items():
-            for sym in syms:
+        for market in self.strategy_markets:
+            for sym in self.symbols_for(market):
                 try:
-                    df = self.broker(market).fetch_ohlcv(sym, self.cfg.timeframe, self.cfg.history_bars)
-                    r = evolution.run_for_symbol(sym, df, self.cfg, self.notify)
+                    df = self.broker(market).fetch_ohlcv(sym, self.timeframe, self.cfg.history_bars)
+                    r = evolution.run_for_symbol(sym, df, self.cfg, self.notify, self.timeframe)
                     out.append({"symbol": sym, "promoted": r.get("promote"), "best": r.get("best")})
                 except Exception as e:
                     db.log(f"Evolução {sym} falhou: {e}", "ERROR")

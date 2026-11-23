@@ -104,6 +104,10 @@ DEFAULT_RUNTIME = {
     "signal_ttl_minutes": "60",      # sinal pendente expira em 60 min
     "evolve_every_hours": "24",
     "kill_switch": "false",
+    # Perfil de operação: normal | metralhadora (vazio = usa o .env)
+    "profile": "normal",
+    "timeframe": "",
+    "crypto_symbols": "",
     # Pesquisa EUA (trader-skill)
     "us_cash_buffer_pct": "10",
     "us_max_position_pct": "25",
@@ -121,3 +125,22 @@ DEFAULT_RUNTIME = {
 }
 
 settings = Settings()
+
+
+# Perfis prontos (aplicados pelo painel). A evolução continua exigindo lucro já
+# descontadas as taxas, então mais operações só acontecem se compensarem.
+PROFILES = {
+    "normal": {
+        "timeframe": "", "crypto_symbols": "", "max_positions": "4", "risk_per_trade": "0.01",
+        "max_position_pct": "0.25", "atr_stop_mult": "2.0", "take_profit_r": "3.0",
+        "signal_ttl_minutes": "60", "evolve_every_hours": "24",
+    },
+    "metralhadora": {
+        "timeframe": "15m",
+        "crypto_symbols": "BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,XRP/USDT,DOGE/USDT,ADA/USDT,AVAX/USDT,"
+                          "LINK/USDT,TRX/USDT,LTC/USDT,DOT/USDT",
+        "max_positions": "8", "risk_per_trade": "0.01", "max_position_pct": "0.15",
+        "atr_stop_mult": "1.5", "take_profit_r": "2.0", "signal_ttl_minutes": "15",
+        "evolve_every_hours": "6", "auto_evolve": "true", "reinvest_profits": "true",
+    },
+}

@@ -152,7 +152,8 @@ def create_app(engine: Engine) -> FastAPI:
         realized = db.one("SELECT COALESCE(SUM(pnl),0) s, COALESCE(SUM(fee),0) f FROM trades")
         return {
             "trading_mode": settings.trading_mode, "broker": settings.broker, "symbols": settings.symbols,
-            "timeframe": settings.timeframe, "equity": eq, "cash": cash, "deposits": deposits,
+            "timeframe": engine.timeframe, "profile": db.get_setting("profile"),
+            "n_symbols": sum(len(engine.symbols_for(m)) for m in engine.strategy_markets), "equity": eq, "cash": cash, "deposits": deposits,
             "profit": eq - deposits, "day_pnl": eq - start, "drawdown": (peak - eq) / peak if peak else 0,
             "realized_pnl": realized["s"], "fees": realized["f"], "positions": positions,
             "settings": db.all_settings(), "last_cycle": engine.last_cycle, "last_error": engine.last_error,
@@ -226,6 +227,16 @@ def create_app(engine: Engine) -> FastAPI:
         if any(k.startswith("us_") for k in v):
             research.write_config()
         return {"settings": db.all_settings()}
+
+    class ProfileIn(BaseModel):
+        name: str
+
+    @app.post("/api/profile", dependencies=protected)
+    def profile(body: ProfileIn):
+        from .config import PROFILES
+        if body.name not in PROFILES:
+            raise HTTPException(400, "perfil desconhecido")
+        return {"message": engine.apply_profile(body.name)}
 
     @app.post("/api/positions/{symbol:path}/close", dependencies=protected)
     def close(symbol: str):
@@ -322,6 +333,11 @@ def create_app(engine: Engine) -> FastAPI:
             out[mode] = {"positions": pos, "trades": trades, "realized": realized["s"], "closed": realized["n"],
                          "open_pnl": sum(p["pnl"] for p in pos), "markets": markets}
         return out
+
+    @app.get("/api/news", dependencies=protected)
+    def news():
+        from . import news_agent
+        return news_agent.ideas(20)
 
     @app.get("/api/stats", dependencies=protected)
     def stats():

@@ -153,3 +153,13 @@ def test_deposit_is_not_profit(fresh_db):
     fresh_db.execute("INSERT INTO cash_flows(ts,amount,note) VALUES(?,?,?)", (fresh_db.now(), -8_000, "saque"))
     risk.update_guards(7_000)                               # saque não dispara a trava
     assert not fresh_db.get_bool("kill_switch")
+
+
+def test_profile_metralhadora(fresh_db, monkeypatch):
+    monkeypatch.setattr(settings, "broker", "crypto")
+    e = _engine()
+    e.apply_profile("metralhadora")
+    assert e.timeframe == "15m" and len(e.symbols_for("main")) == 12
+    assert fresh_db.get_setting("max_positions") == "8"
+    e.apply_profile("normal")
+    assert e.symbols_for("main") == list(settings.symbols)

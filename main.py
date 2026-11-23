@@ -31,6 +31,9 @@ def build():
     engine = Engine(settings, broker, notify=notify, on_signal=telegram.send_signal, us_broker=us)
     if us is not None:
         research.attach(engine)
+    if settings.broker == "crypto":
+        from app import news_agent
+        engine.hooks.append(news_agent.hook)
     try:
         b3 = build_b3_broker(settings)
         if b3 is not None:
