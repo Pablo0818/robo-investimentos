@@ -244,7 +244,7 @@ class Engine:
                 self._st(market, sym, "bloqueado", veto, champ["name"])
                 return
             stop = live_px - db.get_float("atr_stop_mult") * a
-            take = live_px + db.get_float("take_profit_r") * (live_px - stop)
+            take = 0.0 if champ["name"] in st.RUNNERS else live_px + db.get_float("take_profit_r") * (live_px - stop)
             qty = b.normalize_qty(sym, risk.position_size(eq, cash, live_px, stop, sym), live_px)
             if qty <= 0:
                 db.log(f"{sym}: sinal de compra, mas o tamanho calculado é menor que o mínimo do ativo", "WARN")

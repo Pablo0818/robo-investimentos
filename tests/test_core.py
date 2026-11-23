@@ -187,3 +187,20 @@ def test_performance_weight(fresh_db):
         fresh_db.execute("INSERT INTO trades(ts,symbol,side,qty,price,fee,pnl) VALUES(?,?,?,?,?,?,?)",
                          (fresh_db.now(), "Y", "sell", 1, 1, 0, -2))
     assert risk.performance_weight("Y") < 1.0
+
+
+def test_estrategias_dos_traders():
+    import numpy as np
+    import pandas as pd
+    from app import strategies as st
+    n = 400
+    c = 100 * np.exp(np.cumsum(np.random.default_rng(2).normal(0.001, 0.01, n)))
+    df = pd.DataFrame({"open": c, "high": c * 1.002, "low": c * 0.99, "close": c * 1.001,
+                       "volume": np.random.default_rng(3).uniform(1, 4, n)})
+    for name in ("breakout_volume", "momentum_trend", "setup_91"):
+        d = st.STRATEGIES[name]
+        p = d.constrain({k: lo for k, (lo, hi, _) in d.space.items()})
+        pos = st.positions(name, df, p)
+        assert len(pos) == n and set(np.unique(pos)) <= {0.0, 1.0}
+    assert set(st.allowed("hibrido")) >= {"dip_buyer", "breakout_volume", "momentum_trend", "setup_91"}
+    assert st.STRATEGIES["dip_buyer"].space["trend_filter"][0] >= 100  # compra na baixa só em tendência de alta

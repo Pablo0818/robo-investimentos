@@ -30,6 +30,8 @@ class Result:
 def run(df: pd.DataFrame, name: str, params: dict, *, fee: float = 0.001, slippage: float = 0.0005,
         atr_mult: float = 2.0, take_r: float = 3.0, trailing: bool = True, timeframe: str = "1h",
         start: int = 0) -> Result:
+    if name in st.RUNNERS:
+        take_r = 0.0  # deixa o lucro correr
     pos_signal = st.positions(name, df, params)
     close = df["close"].to_numpy()
     high = df["high"].to_numpy()

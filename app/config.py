@@ -108,7 +108,7 @@ DEFAULT_RUNTIME = {
     "profile": "normal",
     "evolve_retry_minutes": "1",   # ativo sem estratégia: testa de novo a cada X minutos
     "evolve_max_per_cycle": "50",  # quantos ativos testar por ciclo (sem limite prático)
-    "strategy_style": "baixa",   # baixa = comprar na queda e vender na alta | tendencia | todas
+    "strategy_style": "hibrido",   # hibrido = baixa em tendência de alta + rompimentos | baixa | tendencia | todas
     "timeframe": "",
     "crypto_symbols": "", "b3_symbols": "",
     # Pesquisa EUA (trader-skill)
@@ -145,7 +145,7 @@ PROFILES = {
         "max_positions": "8", "risk_per_trade": "0.01", "max_position_pct": "0.15",
         "atr_stop_mult": "1.5", "take_profit_r": "2.0", "signal_ttl_minutes": "15",
         "evolve_every_hours": "2", "auto_evolve": "true", "reinvest_profits": "true",
-        "strategy_style": "baixa", "us_max_position_pct": "15", "us_max_orders_per_day": "30",
+        "strategy_style": "hibrido", "us_max_position_pct": "15", "us_max_orders_per_day": "30",
         "us_max_order_usd": "1000", "us_alerts_minutes": "1", "us_news_minutes": "15",
         "b3_symbols": "", "max_daily_loss_pct": "0.03",
     },
@@ -161,7 +161,7 @@ PROFILES = {
         "max_positions": "10", "risk_per_trade": "0.02", "max_position_pct": "0.20",
         "atr_stop_mult": "1.5", "take_profit_r": "2.0", "signal_ttl_minutes": "15",
         "evolve_every_hours": "2", "auto_evolve": "true", "reinvest_profits": "true",
-        "strategy_style": "baixa", "max_daily_loss_pct": "0.06",
+        "strategy_style": "hibrido", "max_daily_loss_pct": "0.06",
         "us_max_position_pct": "20", "us_max_orders_per_day": "50",
         "us_max_order_usd": "1500", "us_alerts_minutes": "1", "us_news_minutes": "15",
     },

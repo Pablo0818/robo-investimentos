@@ -109,6 +109,32 @@ def pct_dip(df: pd.DataFrame, p: dict) -> np.ndarray:
     return _hold(entry, df["close"] > m * (1 + p["gain_pct"] / 100))
 
 
+def breakout_volume(df: pd.DataFrame, p: dict) -> np.ndarray:
+    """Minervini/Qullamaggie: rompe a máxima recente com volume forte, a favor da tendência."""
+    hi = df["high"].rolling(int(p["lookback"])).max().shift()
+    vol = df["volume"] if "volume" in df else pd.Series(1.0, index=df.index)
+    vol_ok = vol > vol.rolling(20).mean() * p["vol_mult"]
+    entry = (df["close"] > hi) & vol_ok & _trend_ok(df, p)
+    return _hold(entry, df["close"] < ema(df["close"], int(p["exit_ema"])))
+
+
+def momentum_trend(df: pd.DataFrame, p: dict) -> np.ndarray:
+    """Momentum de série temporal (fundos de tendência em cripto): acima da média e subindo."""
+    m = sma(df["close"], int(p["ma"]))
+    roc = df["close"].pct_change(int(p["roc"]))
+    entry = (df["close"] > m) & (roc > 0)
+    return _hold(entry, df["close"] < m)
+
+
+def setup_91(df: pd.DataFrame, p: dict) -> np.ndarray:
+    """Setup 9.1 (Larry Williams/Stormer): média exponencial de 9 vira para cima e rompe a máxima."""
+    e = ema(df["close"], 9)
+    up = e > e.shift()
+    turned = up & ~up.shift(fill_value=False)
+    entry = turned & (df["close"] > df["high"].shift()) & _trend_ok(df, p)
+    return _hold(entry, ~up)
+
+
 @dataclass
 class StrategyDef:
     name: str
@@ -129,6 +155,7 @@ class StrategyDef:
 
 
 TREND = (0, 200, "int")
+TREND_REQ = (100, 200, "int")  # Connors / Paul Tudor Jones: comprar na baixa só acima da média longa
 STRATEGIES: dict[str, StrategyDef] = {
     "sma_cross": StrategyDef("sma_cross", sma_cross,
                              {"fast": (5, 60, "int"), "slow": (20, 250, "int"), "trend_filter": TREND},
@@ -138,27 +165,39 @@ STRATEGIES: dict[str, StrategyDef] = {
                              "Seguidor de tendência com médias exponenciais"),
     "rsi_reversion": StrategyDef("rsi_reversion", rsi_reversion,
                                  {"period": (2, 30, "int"), "buy_below": (10, 40, "float"),
-                                  "sell_above": (50, 85, "float"), "trend_filter": TREND},
+                                  "sell_above": (50, 85, "float"), "trend_filter": TREND_REQ},
                                  "Compra em sobrevenda (IFR) e vende na recuperação"),
     "donchian_breakout": StrategyDef("donchian_breakout", donchian_breakout,
                                      {"entry": (10, 100, "int"), "exit": (5, 50, "int"), "trend_filter": TREND},
                                      "Rompimento de máximas (canal de Donchian)"),
     "bollinger_reversion": StrategyDef("bollinger_reversion", bollinger_reversion,
-                                       {"period": (10, 60, "int"), "k": (1.0, 3.0, "float"), "trend_filter": TREND},
+                                       {"period": (10, 60, "int"), "k": (1.0, 3.0, "float"), "trend_filter": TREND_REQ},
                                        "Compra abaixo da banda de Bollinger, vende na média"),
     "dip_buyer": StrategyDef("dip_buyer", dip_buyer,
                              {"period": (2, 6, "int"), "buy_below": (5, 30, "float"), "exit_ma": (3, 12, "int"),
-                              "trend_filter": TREND},
+                              "trend_filter": TREND_REQ},
                              "Compra na queda forte de curto prazo e vende no repique"),
     "pct_dip": StrategyDef("pct_dip", pct_dip,
                            {"period": (10, 80, "int"), "drop_pct": (0.5, 6.0, "float"), "gain_pct": (0.0, 3.0, "float"),
-                            "trend_filter": TREND},
+                            "trend_filter": TREND_REQ},
                            "Compra X% abaixo da média e vende acima dela"),
     "macd_momentum": StrategyDef("macd_momentum", macd_momentum,
                                  {"fast": (5, 20, "int"), "slow": (20, 60, "int"), "signal": (5, 20, "int"),
                                   "trend_filter": TREND},
                                  "Momento pelo MACD"),
+    "breakout_volume": StrategyDef("breakout_volume", breakout_volume,
+                                   {"lookback": (10, 60, "int"), "vol_mult": (1.0, 3.0, "float"),
+                                    "exit_ema": (5, 30, "int"), "trend_filter": TREND_REQ},
+                                   "Rompimento com volume forte (Minervini/Qullamaggie)"),
+    "momentum_trend": StrategyDef("momentum_trend", momentum_trend,
+                                  {"ma": (20, 200, "int"), "roc": (5, 100, "int")},
+                                  "Segue a tendência: acima da média e subindo (fundos de cripto)"),
+    "setup_91": StrategyDef("setup_91", setup_91, {"trend_filter": TREND_REQ},
+                            "Setup 9.1 de Larry Williams (média de 9 vira para cima)"),
 }
+
+# Estratégias de tendência: sem alvo fixo, o lucro corre e sai pelo stop móvel ou pela regra
+RUNNERS = {"breakout_volume", "momentum_trend", "setup_91", "donchian_breakout", "ema_trend", "sma_cross"}
 
 
 def positions(name: str, df: pd.DataFrame, params: dict) -> np.ndarray:
@@ -174,7 +213,11 @@ def describe(name: str, params: dict) -> str:
 # Estilos: "baixa" = só estratégias de comprar na queda e vender na alta
 STYLES = {
     "baixa": ["rsi_reversion", "bollinger_reversion", "dip_buyer", "pct_dip"],
-    "tendencia": ["sma_cross", "ema_trend", "donchian_breakout", "macd_momentum"],
+    "tendencia": ["sma_cross", "ema_trend", "donchian_breakout", "macd_momentum",
+                  "breakout_volume", "momentum_trend", "setup_91"],
+    # híbrido: o melhor dos dois mundos — compra na baixa em tendência de alta + rompimentos
+    "hibrido": ["rsi_reversion", "bollinger_reversion", "dip_buyer", "pct_dip",
+                "breakout_volume", "momentum_trend", "setup_91", "donchian_breakout"],
 }
 
 
