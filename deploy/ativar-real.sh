@@ -13,7 +13,9 @@ case "$op" in
   *) echo "Opção inválida"; exit 1 ;;
 esac
 read -r -p "Cole a API KEY e aperte Enter: " KEY
-read -r -s -p "Cole a API SECRET e aperte Enter (não aparece na tela): " SEC; echo
+read -r -p "Cole a API SECRET e aperte Enter: " SEC
+clear  # apaga o segredo da tela
+KEY=$(printf '%s' "$KEY" | tr -d '[:space:]'); SEC=$(printf '%s' "$SEC" | tr -d '[:space:]')
 [ -n "$KEY" ] && [ -n "$SEC" ] || { echo "Chave vazia, nada foi alterado"; exit 1; }
 
 sed -i '/^REAL_EXCHANGE=/d;/^REAL_API_KEY=/d;/^REAL_SECRET=/d' "$ENV"
