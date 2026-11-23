@@ -101,6 +101,16 @@ class Engine:
             return "paper"
         return "live"
 
+    def live_markets(self) -> list[str]:
+        return [m for m in self.brokers if self.money_mode(m) == "live"]
+
+    def live_equity(self) -> tuple[float, float]:
+        eq = cash = 0.0
+        for m in self.live_markets():
+            e, c = self.market_equity(m)
+            eq, cash = eq + e, cash + c
+        return eq, cash
+
     def fee_for(self, market: str) -> float:
         return self.market_fees.get(market, self.cfg.fee_rate)
 
@@ -162,6 +172,9 @@ class Engine:
                 if not last or (datetime.now(timezone.utc) - datetime.fromisoformat(last["ts"])).total_seconds() >= 55:
                     db.execute("INSERT INTO equity(ts,equity,cash,flows) VALUES(?,?,?,?)",
                                (db.now(), eq, cash, risk.net_deposits()))
+                    if self.live_markets():
+                        leq, lcash = self.live_equity()
+                        db.execute("INSERT INTO equity_live(ts,equity,cash) VALUES(?,?,?)", (db.now(), leq, lcash))
                 risk.update_guards(eq, self.notify)
                 self._maybe_evolve()
                 self._update_indices()

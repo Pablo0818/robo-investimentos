@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS positions (
     opened_ts TEXT, strategy TEXT, highest REAL, market TEXT DEFAULT 'main'
 );
 CREATE TABLE IF NOT EXISTS equity (ts TEXT, equity REAL, cash REAL, flows REAL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS equity_live (ts TEXT, equity REAL, cash REAL);
 CREATE TABLE IF NOT EXISTS strategies (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     symbol TEXT, name TEXT, params TEXT,

@@ -150,7 +150,7 @@ def create_app(engine: Engine) -> FastAPI:
             p["pnl"] = (px - p["avg_price"]) * p["qty"]
             p["pnl_pct"] = px / p["avg_price"] - 1 if p["avg_price"] else 0
         realized = db.one("SELECT COALESCE(SUM(pnl),0) s, COALESCE(SUM(fee),0) f FROM trades")
-        return {
+        out = {
             "trading_mode": settings.trading_mode, "broker": settings.broker, "symbols": settings.symbols,
             "timeframe": engine.timeframe, "profile": db.get_setting("profile"),
             "n_symbols": sum(len(engine.symbols_for(m)) for m in engine.strategy_markets), "equity": eq, "cash": cash, "deposits": deposits,
@@ -160,12 +160,31 @@ def create_app(engine: Engine) -> FastAPI:
             "markets": {k: b.name for k, b in engine.brokers.items()},
             "by_market": [
                 {"market": m, "label": {"main": f"Cripto ({settings.quote_currency})", "us": "EUA (US$)",
-                                        "b3": "B3 (R$)"}.get(m, m),
+                                        "b3": "B3 (R$)", "real": f"💰 Real (R$) · {settings.real_exchange}"}.get(m, m),
                  "equity": engine.market_equity(m)[0], "cash": engine.market_equity(m)[1]}
                 for m in engine.brokers],
             "pending": db.one("SELECT COUNT(*) c FROM signals WHERE status='pending'")["c"],
             "us_enabled": "us" in engine.brokers, "sec_ready": bool(settings.sec_user_agent),
         }
+        live = engine.live_markets()
+        if live:  # com dinheiro real ligado, o painel mostra SÓ o dinheiro real
+            out["sim_equity"] = out["equity"]
+            leq, lcash = engine.live_equity()
+            ph = ",".join("?" * len(live))
+            lpos = [p for p in positions if p.get("market") in live]
+            lr = db.one(f"SELECT COALESCE(SUM(pnl),0) s, COALESCE(SUM(fee),0) f FROM trades WHERE market IN ({ph})",
+                        tuple(live))
+            day = db.get_setting(f"live_day:{live[0]}").partition("|")[2] if len(live) == 1 else ""
+            peak = max([db.get_float(f"live_peak:{m}") for m in live if db.get_setting(f"live_peak:{m}")] + [leq])
+            first = db.one("SELECT equity FROM equity_live WHERE equity>0 ORDER BY ts LIMIT 1")
+            base = float(first["equity"]) if first else leq
+            out.update({
+                "trading_mode": "live", "equity": leq, "cash": lcash, "deposits": base, "profit": leq - base,
+                "day_pnl": leq - float(day) if day else 0.0, "drawdown": (peak - leq) / peak if peak else 0,
+                "realized_pnl": lr["s"], "fees": lr["f"], "positions": lpos,
+                "by_market": [x for x in out["by_market"] if x["market"] in live],
+            })
+        return out
 
     @app.get("/api/signals", dependencies=protected)
     def signals(status: str = "", limit: int = 100):
@@ -187,7 +206,8 @@ def create_app(engine: Engine) -> FastAPI:
 
     @app.get("/api/equity", dependencies=protected)
     def equity(limit: int = 2000):
-        rows = db.query("SELECT ts, equity, cash FROM equity ORDER BY ts DESC LIMIT ?", (limit,))
+        table = "equity_live" if engine.live_markets() else "equity"  # com dinheiro real, o gráfico é só dele
+        rows = db.query(f"SELECT ts, equity, cash FROM {table} ORDER BY ts DESC LIMIT ?", (limit,))
         return list(reversed(rows))
 
     @app.get("/api/strategies", dependencies=protected)
