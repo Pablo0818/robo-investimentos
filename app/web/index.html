@@ -121,6 +121,7 @@ async function home(m){
     <div class="card"><div class="flex justify-between items-center mb-2"><div class="font-semibold">Desempenho</div><div class="text-xs muted" id="st0"></div></div>
       <div class="grid grid-cols-3 gap-2 text-center mb-2" id="st1"></div><div style="height:90px"><canvas id="pnls"></canvas></div></div>
   </div>
+  <div class="card"><div class="font-semibold mb-1">🤖 O que o robô está fazendo agora</div><div id="rstate" class="text-sm muted">Carregando…</div></div>
   <div class="card"><div class="flex justify-between items-center mb-1"><div class="font-semibold">Mercado agora</div><button class="text-xs" style="color:var(--acc)" onclick="go('market')">ver gráficos →</button></div><div id="wl" class="text-sm muted">Carregando cotações...</div></div>
   <div class="card"><div class="font-semibold mb-2">Sinais aguardando você</div><div id="pend"></div></div>
   ${S.trading_mode=="paper"?`<div class="card"><div class="font-semibold mb-1">Pronto para dinheiro real?</div><div id="ready" class="text-sm muted">Conferindo...</div></div>`:""}`;
@@ -133,6 +134,10 @@ async function home(m){
   $("#st1").innerHTML=[["Acerto",stt.trades?(stt.win_rate*100).toFixed(0)+"%":"-"],["Fator lucro",stt.profit_factor?fmt(stt.profit_factor):"-"],["Melhor",fmt(stt.best)]].map(([a,b])=>`<div class="rounded-xl py-2" style="background:var(--panel2)"><div class="text-xs muted">${a}</div><div class="font-semibold num">${b}</div></div>`).join("");
   charts.push(new Chart($("#pnls"),{type:"bar",data:{labels:stt.last_pnls.map((_,i)=>i+1),datasets:[{data:stt.last_pnls,backgroundColor:stt.last_pnls.map(v=>v>=0?"#22c55e":"#ef4444"),borderRadius:3}]},options:{maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{display:false},y:{display:false}}}}));
   $("#wl").innerHTML=wl.length?watchRows(wl.slice(0,8)):"Aguardando o primeiro ciclo do robô.";
+  api("/api/robot/state").then(rs=>{const IC={"comprado":"🟢","comprando":"⚡","bloqueado":"⛔","aguardando":"⏳","sem estratégia":"🧪"};
+    const cnt={};rs.forEach(x=>cnt[x.status]=(cnt[x.status]||0)+1);
+    $("#rstate").innerHTML=(rs.length?`<div class="flex gap-2 flex-wrap mb-2">${Object.entries(cnt).map(([k,v])=>`<span class="chip" style="background:var(--panel2);color:var(--txt)">${IC[k]||""} ${v} ${k}</span>`).join("")}</div>`:"")+
+    (rs.map(x=>`<div class="flex justify-between gap-2 py-1.5" style="border-top:1px solid var(--line)"><span style="color:var(--txt)">${IC[x.status]||""} <b>${x.symbol}</b> <span class="text-xs muted">${MK[x.market]||""}${x.strategy?" · "+x.strategy:""}</span></span><span class="text-xs muted text-right">${x.detail}</span></div>`).join("")||"Aguardando o primeiro ciclo.")}).catch(()=>{});
   if(S.trading_mode=="paper")api("/api/readiness").then(r=>{$("#ready").innerHTML=`<div class="font-bold mb-2" style="color:${r.ready?"var(--up)":"var(--warn)"}">${r.ready?"✅ Sim":"⏳ Ainda não"}</div>`+r.items.map(i=>`<div class="flex justify-between gap-2 py-1.5" style="border-top:1px solid var(--line)"><span>${i.ok?"✅":"⏳"} ${i.label}</span><span class="text-xs muted text-right">${i.value}</span></div>`).join("")+`<div class="text-xs mt-2">${r.advice}</div>`}).catch(()=>{});
 }
 function watchRows(w){return w.map(r=>`<div class="flex items-center justify-between py-2 cursor-pointer gap-2" style="border-top:1px solid var(--line)" onclick="openChart('${r.market}','${r.symbol}')">

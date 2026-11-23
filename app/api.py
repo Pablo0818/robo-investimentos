@@ -334,6 +334,11 @@ def create_app(engine: Engine) -> FastAPI:
                          "open_pnl": sum(p["pnl"] for p in pos), "markets": markets}
         return out
 
+    @app.get("/api/robot/state", dependencies=protected)
+    def robot_state():
+        order = {"comprado": 0, "comprando": 1, "bloqueado": 2, "aguardando": 3, "sem estratégia": 4}
+        return sorted(engine.state.values(), key=lambda x: (order.get(x["status"], 9), x["symbol"]))
+
     @app.get("/api/news", dependencies=protected)
     def news():
         from . import news_agent

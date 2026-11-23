@@ -106,6 +106,7 @@ DEFAULT_RUNTIME = {
     "kill_switch": "false",
     # Perfil de operação: normal | metralhadora (vazio = usa o .env)
     "profile": "normal",
+    "strategy_style": "baixa",   # baixa = comprar na queda e vender na alta | tendencia | todas
     "timeframe": "",
     "crypto_symbols": "",
     # Pesquisa EUA (trader-skill)
@@ -142,5 +143,6 @@ PROFILES = {
         "max_positions": "8", "risk_per_trade": "0.01", "max_position_pct": "0.15",
         "atr_stop_mult": "1.5", "take_profit_r": "2.0", "signal_ttl_minutes": "15",
         "evolve_every_hours": "6", "auto_evolve": "true", "reinvest_profits": "true",
+        "strategy_style": "baixa",
     },
 }

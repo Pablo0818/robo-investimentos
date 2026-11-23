@@ -54,7 +54,7 @@ def score(r: backtest.Result, max_dd: float, min_trades: int) -> float:
 def evolve(df: pd.DataFrame, *, timeframe: str = "1h", fee: float = 0.001, slippage: float = 0.0005,
            atr_mult: float = 2.0, take_r: float = 3.0, trailing: bool = True, max_dd: float = 0.15,
            generations: int = 8, population: int = 40, champion: dict | None = None,
-           seed: int | None = None) -> dict:
+           seed: int | None = None, names: list[str] | None = None) -> dict:
     rng = random.Random(seed)
     split = int(len(df) * 0.7)
     train = df.iloc[:split].reset_index(drop=True)
@@ -67,7 +67,9 @@ def evolve(df: pd.DataFrame, *, timeframe: str = "1h", fee: float = 0.001, slipp
         except Exception:
             return -99.0
 
-    names = list(STRATEGIES)
+    names = names or list(STRATEGIES)
+    if champion and champion["name"] not in names:
+        champion = None  # campeã de outro estilo não entra na disputa
     pop = [{"name": n, "params": _random_params(n, rng)} for n in rng.choices(names, k=population)]
     if champion:
         pop[0] = {"name": champion["name"], "params": champion["params"]}
@@ -142,8 +144,11 @@ def run_for_symbol(symbol: str, df: pd.DataFrame, cfg, notify=None, timeframe: s
     champion = {"name": champ_row["name"], "params": json.loads(champ_row["params"])} if champ_row else None
     res = evolve(df, timeframe=timeframe or cfg.timeframe, fee=cfg.fee_rate, slippage=cfg.slippage,
                  atr_mult=db.get_float("atr_stop_mult"), take_r=db.get_float("take_profit_r"),
-                 trailing=db.get_bool("trailing_stop"), max_dd=db.get_float("max_drawdown_pct"),
-                 champion=champion)
+                 trailing=db.get_bool("trailing_stop"),
+                 # o backtest usa 100% do capital; na conta cada ativo usa só uma fração dele
+                 max_dd=min(0.35, db.get_float("max_drawdown_pct") / max(0.05, db.get_float("max_position_pct"))),
+                 champion=champion, names=__import__("app.strategies", fromlist=["allowed"]).allowed(
+                     db.get_setting("strategy_style")))
     best = res["best"]
     if not best:
         db.log(f"Evolução {symbol}: nenhuma estratégia passou na prova fora da amostra; mantendo a atual"

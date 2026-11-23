@@ -29,6 +29,13 @@ def build():
     except Exception as e:
         db.log(f"Bolsa dos EUA desativada: {e}", "WARN")
     engine = Engine(settings, broker, notify=notify, on_signal=telegram.send_signal, us_broker=us)
+    # migração v2: novo estilo "comprar na baixa, vender na alta" -> reaprender estratégias
+    if db.get_setting("style_v") != "2":
+        db.set_setting("strategy_style", "baixa")
+        db.execute("UPDATE strategies SET status='retired' WHERE status IN ('champion','proposed')")
+        db.execute("DELETE FROM settings WHERE key LIKE 'evolve_try:%'")
+        db.set_setting("style_v", "2")
+        db.log("Estilo 'comprar na baixa, vender na alta' ativado: reaprendendo as estratégias")
     if us is not None:
         research.attach(engine)
     if settings.broker == "crypto":

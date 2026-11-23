@@ -36,6 +36,7 @@ class Engine:
         self.candles: dict[tuple[str, str], "object"] = {}
         self.indices: list[tuple[str, str, str]] = []  # (mercado, símbolo, nome)
         self.index_data: dict[str, dict] = {}
+        self.state: dict[tuple[str, str], dict] = {}  # o que o robô está fazendo em cada ativo
         self.last_error: str | None = None
 
     # ------------------------------------------------------------------ util
@@ -164,6 +165,10 @@ class Engine:
                 self.last_error = str(e)
                 db.log(f"Erro no ciclo: {e}\n{traceback.format_exc()}", "ERROR")
 
+    def _st(self, market: str, sym: str, status: str, detail: str = "", strategy: str | None = None) -> None:
+        self.state[(market, sym)] = {"market": market, "symbol": sym, "status": status, "detail": detail,
+                                     "strategy": strategy, "ts": db.now()}
+
     def process_symbol(self, sym: str, market: str = "main") -> None:
         b = self.broker(market)
         df = b.fetch_ohlcv(sym, self.timeframe, self.cfg.history_bars)
@@ -177,12 +182,14 @@ class Engine:
             key = f"evolve_try:{sym}"
             last = db.get_setting(key)
             if last and datetime.now(timezone.utc) - datetime.fromisoformat(last) < timedelta(hours=6):
+                self._st(market, sym, "sem estratégia", "nenhuma estratégia deu lucro no teste; tenta de novo em até 6h")
                 return  # tenta de novo a cada 6h
             db.set_setting(key, db.now())
             db.log(f"{sym}: sem estratégia aprovada ainda, rodando evolução...")
             evolution.run_for_symbol(sym, df, self.cfg, self.notify, self.timeframe)
             champ = self.champion(sym)
             if champ is None:
+                self._st(market, sym, "sem estratégia", "nenhuma estratégia deu lucro no teste; tenta de novo em 6h")
                 return
         pos_arr = st.positions(champ["name"], df, champ["params"])
         want, prev = pos_arr[-1], pos_arr[-2]
@@ -196,6 +203,8 @@ class Engine:
             if db.get_bool("trailing_stop") and stop:
                 stop = max(stop, live_px - db.get_float("atr_stop_mult") * a)
             db.execute("UPDATE positions SET highest=?, stop=? WHERE symbol=?", (hi, stop, sym))
+            self._st(market, sym, "comprado", f"resultado {live_px / position['avg_price'] - 1:+.2%} · stop "
+                     f"{stop:.6g} · alvo {position['take'] or 0:.6g}", champ["name"])
             if stop and live_px <= stop:
                 self._exit_now(sym, "stop de proteção atingido")
             elif position["take"] and live_px >= position["take"]:
@@ -205,16 +214,22 @@ class Engine:
                                    f"estratégia {champ['name']} mandou sair", market=market)
             return
 
+        if not (want == 1 and prev == 0):
+            self._st(market, sym, "aguardando", "esperando o preço cair até o ponto de compra da estratégia"
+                     if champ["name"] in st.STYLES["baixa"] else "esperando o sinal de entrada", champ["name"])
+            return
         if want == 1 and prev == 0:
             eq, cash = self.market_equity(market)
             chk = risk.can_open(sym, eq, b.is_market_open(sym), market)
             if not chk.ok:
                 db.log(f"{sym}: sinal de compra ignorado ({chk.reason})")
+                self._st(market, sym, "bloqueado", chk.reason, champ["name"])
                 return
             from . import news_agent
             veto = news_agent.blocks_buy(sym) if market == "main" else None
             if veto:
                 db.log(f"{sym}: compra vetada pelo agente de notícias ({veto})")
+                self._st(market, sym, "bloqueado", veto, champ["name"])
                 return
             stop = live_px - db.get_float("atr_stop_mult") * a
             take = live_px + db.get_float("take_profit_r") * (live_px - stop)
@@ -224,6 +239,7 @@ class Engine:
                 return
             self.create_signal(sym, "buy", qty, live_px, stop, take, champ["name"],
                                st.describe(champ["name"], champ["params"]), market=market)
+            self._st(market, sym, "comprando", "sinal de compra gerado agora", champ["name"])
 
     def _update_indices(self) -> None:
         """Índices de referência (ex.: Ibovespa) para o painel, no máximo a cada 5 min."""

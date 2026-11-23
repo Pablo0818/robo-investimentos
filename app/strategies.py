@@ -95,6 +95,20 @@ def macd_momentum(df: pd.DataFrame, p: dict) -> np.ndarray:
     return ((m > sig) & (m > 0) & _trend_ok(df, p)).to_numpy().astype(float)
 
 
+def dip_buyer(df: pd.DataFrame, p: dict) -> np.ndarray:
+    """Compra na queda: IFR curtíssimo muito baixo (pânico de curto prazo), vende no repique."""
+    r = rsi(df["close"], int(p["period"]))
+    entry = (r < p["buy_below"]) & _trend_ok(df, p)
+    return _hold(entry, df["close"] > sma(df["close"], int(p["exit_ma"])))
+
+
+def pct_dip(df: pd.DataFrame, p: dict) -> np.ndarray:
+    """Compra quando o preço cai X% abaixo da média; vende quando volta para a média + Y%."""
+    m = sma(df["close"], int(p["period"]))
+    entry = (df["close"] < m * (1 - p["drop_pct"] / 100)) & _trend_ok(df, p)
+    return _hold(entry, df["close"] > m * (1 + p["gain_pct"] / 100))
+
+
 @dataclass
 class StrategyDef:
     name: str
@@ -132,6 +146,14 @@ STRATEGIES: dict[str, StrategyDef] = {
     "bollinger_reversion": StrategyDef("bollinger_reversion", bollinger_reversion,
                                        {"period": (10, 60, "int"), "k": (1.0, 3.0, "float"), "trend_filter": TREND},
                                        "Compra abaixo da banda de Bollinger, vende na média"),
+    "dip_buyer": StrategyDef("dip_buyer", dip_buyer,
+                             {"period": (2, 6, "int"), "buy_below": (5, 30, "float"), "exit_ma": (3, 12, "int"),
+                              "trend_filter": TREND},
+                             "Compra na queda forte de curto prazo e vende no repique"),
+    "pct_dip": StrategyDef("pct_dip", pct_dip,
+                           {"period": (10, 80, "int"), "drop_pct": (0.5, 6.0, "float"), "gain_pct": (0.0, 3.0, "float"),
+                            "trend_filter": TREND},
+                           "Compra X% abaixo da média e vende acima dela"),
     "macd_momentum": StrategyDef("macd_momentum", macd_momentum,
                                  {"fast": (5, 20, "int"), "slow": (20, 60, "int"), "signal": (5, 20, "int"),
                                   "trend_filter": TREND},
@@ -147,3 +169,14 @@ def describe(name: str, params: dict) -> str:
     d = STRATEGIES[name].description
     ps = ", ".join(f"{k}={v}" for k, v in params.items())
     return f"{d} ({ps})"
+
+
+# Estilos: "baixa" = só estratégias de comprar na queda e vender na alta
+STYLES = {
+    "baixa": ["rsi_reversion", "bollinger_reversion", "dip_buyer", "pct_dip"],
+    "tendencia": ["sma_cross", "ema_trend", "donchian_breakout", "macd_momentum"],
+}
+
+
+def allowed(style: str) -> list[str]:
+    return STYLES.get(style) or list(STRATEGIES)
