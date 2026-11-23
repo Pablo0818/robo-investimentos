@@ -254,6 +254,88 @@ def create_app(engine: Engine) -> FastAPI:
                 m["sales"] += t["qty"] * t["price"]
         return [{"month": k[0], "market": k[1], **v} for k, v in sorted(out.items(), reverse=True)]
 
+    # ------------------------------------------------------- mercado / gráficos
+    def _row(market: str, sym: str, df, name: str | None = None) -> dict:
+        closes = df["close"].astype(float).tolist()
+        last = closes[-1]
+        ts = df["ts"]
+        cut = ts.iloc[-1] - __import__("pandas").Timedelta(hours=24)
+        prev24 = df[ts <= cut]["close"]
+        ref = float(prev24.iloc[-1]) if len(prev24) else closes[0]
+        pos = db.one("SELECT qty, avg_price FROM positions WHERE symbol=?", (sym,))
+        champ = db.one("SELECT name FROM strategies WHERE symbol=? AND status='champion'", (sym,))
+        step = max(1, len(closes) // 48)
+        return {"market": market, "symbol": sym, "name": name or sym, "price": last,
+                "change_24h": last / ref - 1 if ref else 0, "spark": closes[-48 * step::step][-48:],
+                "position": bool(pos), "pnl_pct": (last / pos["avg_price"] - 1) if pos else None,
+                "strategy": champ["name"] if champ else None}
+
+    @app.get("/api/market/watchlist", dependencies=protected)
+    def watchlist():
+        rows = []
+        for sym, d in engine.index_data.items():
+            try:
+                rows.append({**_row(d["market"], sym, d["df"], d["name"]), "index": True})
+            except Exception:
+                pass
+        for (market, sym), df in list(engine.candles.items()):
+            try:
+                rows.append(_row(market, sym, df))
+            except Exception:
+                pass
+        return rows
+
+    @app.get("/api/market/candles", dependencies=protected)
+    def candles(symbol: str, market: str = "main"):
+        df = engine.candles.get((market, symbol))
+        if df is None:
+            d = engine.index_data.get(symbol)
+            df = d["df"] if d else None
+        if df is None:
+            raise HTTPException(404, "sem dados ainda para este ativo")
+        from . import strategies as st
+        bars = [{"time": int(r.ts.timestamp()), "open": float(r.open), "high": float(r.high),
+                 "low": float(r.low), "close": float(r.close)} for r in df.itertuples()]
+        ema = st.ema(df["close"], 50).tolist()
+        trades = db.query("SELECT ts, side, price, qty, pnl FROM trades WHERE symbol=? ORDER BY ts", (symbol,))
+        pos = db.one("SELECT * FROM positions WHERE symbol=?", (symbol,))
+        return {"bars": bars, "ema": [{"time": b["time"], "value": float(v)} for b, v in zip(bars, ema)],
+                "trades": trades, "position": pos}
+
+    @app.get("/api/portfolio", dependencies=protected)
+    def portfolio():
+        """Carteira separada: dinheiro fictício x dinheiro real, com cada investimento ao vivo."""
+        cur = {"main": settings.quote_currency, "us": "US$", "b3": "R$"}
+        out = {}
+        for mode in ("paper", "live"):
+            pos = db.query("SELECT * FROM positions WHERE COALESCE(mode,'paper')=? ORDER BY opened_ts DESC", (mode,))
+            for p in pos:
+                px = engine.prices.get(p["symbol"], p["avg_price"])
+                p.update(price=px, invested=p["qty"] * p["avg_price"], value=p["qty"] * px,
+                         pnl=(px - p["avg_price"]) * p["qty"], pnl_pct=px / p["avg_price"] - 1 if p["avg_price"] else 0,
+                         currency=cur.get(p["market"], ""))
+            trades = db.query("SELECT * FROM trades WHERE COALESCE(mode,'paper')=? ORDER BY id DESC LIMIT 40", (mode,))
+            realized = db.one("SELECT COALESCE(SUM(pnl),0) s, COUNT(*) n FROM trades WHERE side='sell' AND "
+                              "COALESCE(mode,'paper')=?", (mode,))
+            markets = [{"market": m, "currency": cur.get(m, ""), "equity": engine.market_equity(m)[0],
+                        "cash": engine.market_equity(m)[1]} for m in engine.brokers if engine.money_mode(m) == mode]
+            out[mode] = {"positions": pos, "trades": trades, "realized": realized["s"], "closed": realized["n"],
+                         "open_pnl": sum(p["pnl"] for p in pos), "markets": markets}
+        return out
+
+    @app.get("/api/stats", dependencies=protected)
+    def stats():
+        sells = db.query("SELECT pnl, market FROM trades WHERE side='sell'")
+        wins = [t["pnl"] for t in sells if t["pnl"] > 0]
+        losses = [t["pnl"] for t in sells if t["pnl"] <= 0]
+        gl = -sum(losses)
+        return {"trades": len(sells), "win_rate": len(wins) / len(sells) if sells else 0,
+                "profit_factor": (sum(wins) / gl) if gl > 0 else None,
+                "avg_win": sum(wins) / len(wins) if wins else 0, "avg_loss": sum(losses) / len(losses) if losses else 0,
+                "best": max((t["pnl"] for t in sells), default=0), "worst": min((t["pnl"] for t in sells), default=0),
+                "last_pnls": [t["pnl"] for t in db.query(
+                    "SELECT pnl FROM trades WHERE side='sell' ORDER BY id DESC LIMIT 30")][::-1]}
+
     @app.get("/api/readiness", dependencies=protected)
     def ready():
         return readiness.check(engine)

@@ -21,6 +21,7 @@ class CryptoBroker(Broker):
         if testnet:
             self.ex.set_sandbox_mode(True)
         self.quote = quote
+        self.paper = bool(testnet)
         self._markets = None
 
     @property

@@ -63,6 +63,7 @@ class AlpacaBroker(Broker):
     name = "alpaca"
 
     def __init__(self, key: str, secret: str, paper: bool = True):
+        self.paper = paper
         self.base = "https://paper-api.alpaca.markets" if paper else "https://api.alpaca.markets"
         self.data = "https://data.alpaca.markets"
         self.h = {"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret}
@@ -117,7 +118,7 @@ class B3YahooFeed(YahooFeed):
 
     @staticmethod
     def _y(symbol: str) -> str:
-        return symbol if symbol.endswith(".SA") else f"{symbol}.SA"
+        return symbol if symbol.endswith(".SA") or symbol.startswith("^") else f"{symbol}.SA"
 
     def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
         return super().fetch_ohlcv(self._y(symbol), timeframe, limit)

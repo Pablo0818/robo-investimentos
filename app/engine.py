@@ -32,6 +32,10 @@ class Engine:
         self.hooks: list[Callable[["Engine"], None]] = []
         self.fill_hooks: list[Callable[[dict, object], None]] = []
         self.last_cycle: str | None = None
+        # gráficos do painel: últimos candles de cada ativo e índices de referência
+        self.candles: dict[tuple[str, str], "object"] = {}
+        self.indices: list[tuple[str, str, str]] = []  # (mercado, símbolo, nome)
+        self.index_data: dict[str, dict] = {}
         self.last_error: str | None = None
 
     # ------------------------------------------------------------------ util
@@ -53,6 +57,13 @@ class Engine:
     def add_strategy_market(self, market: str, broker: Broker, symbols: list[str]) -> None:
         self.brokers[market] = broker
         self.strategy_markets[market] = list(symbols)
+
+    def money_mode(self, market: str) -> str:
+        """'paper' = dinheiro fictício (simulação/testnet/conta demo) | 'live' = dinheiro real."""
+        b = self.brokers.get(market)
+        if b is None or b.name == "paper" or getattr(b, "paper", False):
+            return "paper"
+        return "live"
 
     def market_equity(self, market: str) -> tuple[float, float]:
         """Patrimônio e caixa de UM mercado (cada mercado tem sua moeda e seu caixa)."""
@@ -113,6 +124,7 @@ class Engine:
                                (db.now(), eq, cash, risk.net_deposits()))
                 risk.update_guards(eq, self.notify)
                 self._maybe_evolve()
+                self._update_indices()
                 for h in self.hooks:
                     try:
                         h(self)
@@ -131,6 +143,7 @@ class Engine:
             db.log(f"{sym}: histórico insuficiente ({len(df)} candles)", "WARN")
             return
         self.prices[sym] = float(df["close"].iloc[-1])
+        self.candles[(market, sym)] = df.tail(400).reset_index(drop=True)
         champ = self.champion(sym)
         if champ is None:
             key = f"evolve_try:{sym}"
@@ -178,6 +191,18 @@ class Engine:
                 return
             self.create_signal(sym, "buy", qty, live_px, stop, take, champ["name"],
                                st.describe(champ["name"], champ["params"]), market=market)
+
+    def _update_indices(self) -> None:
+        """Índices de referência (ex.: Ibovespa) para o painel, no máximo a cada 5 min."""
+        for market, sym, name in self.indices:
+            cur = self.index_data.get(sym)
+            if cur and time.time() - cur["t"] < 300:
+                continue
+            try:
+                df = self.broker(market).fetch_ohlcv(sym, "1d", 120)
+                self.index_data[sym] = {"t": time.time(), "name": name, "market": market, "df": df}
+            except Exception as e:
+                db.log(f"Índice {name} indisponível: {e}", "WARN")
 
     # -------------------------------------------------------------- sinais
     def create_signal(self, sym: str, side: str, qty: float, price: float, stop: float, take: float,
@@ -253,9 +278,10 @@ class Engine:
                     avg = (pos["avg_price"] * pos["qty"] + cost) / nq
                     db.execute("UPDATE positions SET qty=?, avg_price=? WHERE symbol=?", (nq, avg, sym))
                 else:
-                    db.execute("INSERT INTO positions(symbol,qty,avg_price,stop,take,opened_ts,strategy,highest,market)"
-                               " VALUES(?,?,?,?,?,?,?,?,?)",
-                               (sym, fill.qty, cost / fill.qty, stop, take, db.now(), sig["strategy"], fill.price, market))
+                    db.execute("INSERT INTO positions(symbol,qty,avg_price,stop,take,opened_ts,strategy,highest,market,mode)"
+                               " VALUES(?,?,?,?,?,?,?,?,?,?)",
+                               (sym, fill.qty, cost / fill.qty, stop, take, db.now(), sig["strategy"], fill.price, market,
+                                self.money_mode(market)))
                 pnl = 0.0
             else:
                 pos = db.one("SELECT * FROM positions WHERE symbol=?", (sym,))
@@ -269,10 +295,10 @@ class Engine:
                     db.execute("DELETE FROM positions WHERE symbol=?", (sym,))
                 else:
                     db.execute("UPDATE positions SET qty=? WHERE symbol=?", (left, sym))
-            db.execute("INSERT INTO trades(ts,symbol,side,qty,price,fee,pnl,signal_id,strategy,reason,market)"
-                       " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            db.execute("INSERT INTO trades(ts,symbol,side,qty,price,fee,pnl,signal_id,strategy,reason,market,mode)"
+                       " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                        (db.now(), sym, side, fill.qty, fill.price, fill.fee, pnl, sig["id"], sig["strategy"],
-                        sig["reason"], market))
+                        sig["reason"], market, self.money_mode(market)))
             db.execute("UPDATE signals SET status='executed' WHERE id=?", (sig["id"],))
             for h in self.fill_hooks:
                 try:

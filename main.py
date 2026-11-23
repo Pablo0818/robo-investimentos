@@ -35,6 +35,7 @@ def build():
         b3 = build_b3_broker(settings)
         if b3 is not None:
             engine.add_strategy_market("b3", b3, settings.b3_symbols)
+            engine.indices.append(("b3", "^BVSP", "Ibovespa"))
             db.log(f"B3 em simulação (preços reais, R$): {', '.join(settings.b3_symbols)}")
     except Exception as e:
         db.log(f"B3 desativada: {e}", "WARN")
@@ -67,11 +68,36 @@ def build():
     return engine
 
 
+def auto_update(stop: threading.Event) -> None:
+    """Atualização automática: a cada 10 min confere o GitHub e, se houver versão nova,
+    roda deploy/atualizar.sh fora deste processo (o robô reinicia sozinho em segundos)."""
+    import shutil
+    import subprocess
+
+    repo = os.getenv("REPO_DIR", "/root/robo-investimentos")
+    if os.getenv("AUTO_UPDATE", "true").lower() not in ("1", "true", "sim") or not os.path.isdir(f"{repo}/.git") \
+            or not shutil.which("systemd-run"):
+        return
+    while not stop.wait(600):
+        try:
+            subprocess.run(["git", "-C", repo, "fetch", "-q"], timeout=60, check=True)
+            local = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], capture_output=True, text=True).stdout
+            remote = subprocess.run(["git", "-C", repo, "rev-parse", "@{u}"], capture_output=True, text=True).stdout
+            if local.strip() and remote.strip() and local != remote:
+                db.log("Nova versão encontrada no GitHub: atualizando sozinho...")
+                notify("🔄 Atualizando o robô para a nova versão (volta em segundos).")
+                subprocess.run(["systemd-run", "--unit", f"robo-update-{int(__import__('time').time())}",
+                                "bash", f"{repo}/deploy/atualizar.sh"], timeout=30)
+        except Exception as e:
+            db.log(f"Atualização automática falhou: {e}", "WARN")
+
+
 def main():
     engine = build()
     stop = threading.Event()
     threading.Thread(target=engine.run_forever, args=(stop,), daemon=True, name="engine").start()
     threading.Thread(target=telegram.poll_forever, args=(stop,), daemon=True, name="telegram").start()
+    threading.Thread(target=auto_update, args=(stop,), daemon=True, name="auto-update").start()
     if telegram.enabled:
         telegram.send(f"🤖 Robô ligado ({settings.trading_mode.upper()}, {settings.broker}). /status")
 

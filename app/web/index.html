@@ -1,143 +1,252 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="pt-BR" class="dark">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#0f172a">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a0f1c">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/static/icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Robô">
 <title>Robô de Investimentos</title>
 <link rel="stylesheet" href="/static/app.css">
 <script src="/static/chart.umd.js"></script>
+<script src="/static/lwc.js"></script>
 <style>
-  body{font-family:Inter,system-ui,sans-serif}
-  .tab.active{background:#0f172a;color:#fff}
-  .card{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:14px}
-  .btn{padding:7px 12px;border-radius:9px;font-weight:600;font-size:14px}
-  .pos{color:#059669}.neg{color:#dc2626}
-  table{width:100%;font-size:13px}th{text-align:left;color:#64748b;font-weight:500;padding:6px 4px}td{padding:6px 4px;border-top:1px solid #f1f5f9}
-  input,select,textarea{border:1px solid #cbd5e1;border-radius:8px;padding:6px 8px;font-size:14px;width:100%}
+  :root{--bg:#0a0f1c;--panel:#111827;--panel2:#162033;--line:#1f2a3d;--muted:#8b97ad;--txt:#e6ebf5;--up:#22c55e;--down:#ef4444;--acc:#38bdf8;--warn:#f59e0b}
+  body{background:var(--bg);color:var(--txt);font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px}
+  .muted{color:var(--muted)} .up{color:var(--up)} .down{color:var(--down)}
+  .btn{padding:8px 14px;border-radius:10px;font-weight:600;font-size:14px;transition:.15s}
+  .btn:active{transform:scale(.97)}
+  .chip{font-size:11px;padding:2px 8px;border-radius:999px;font-weight:600}
+  .tab{color:var(--muted);padding:8px 14px;border-radius:10px;white-space:nowrap;font-weight:500}
+  .tab.active{background:var(--panel2);color:var(--txt)}
+  table{width:100%;font-size:13px}th{text-align:left;color:var(--muted);font-weight:500;padding:8px 6px;font-size:12px}td{padding:8px 6px;border-top:1px solid var(--line)}
+  input,select,textarea{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:8px 10px;font-size:16px;width:100%}
+  .num{font-variant-numeric:tabular-nums}
+  .kpi-v{font-size:22px;font-weight:700;letter-spacing:-.02em}
+  .tick{display:flex;gap:24px;animation:scroll 40s linear infinite;width:max-content}
+  @keyframes scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}} .live-dot{width:8px;height:8px;border-radius:99px;background:var(--up);display:inline-block;animation:pulse 1.6s infinite}
+  .glow{box-shadow:0 0 0 1px rgba(56,189,248,.35),0 8px 30px -10px rgba(56,189,248,.35)}
+  .seg{display:flex;background:var(--panel2);border-radius:12px;padding:4px}.seg button{flex:1;padding:8px;border-radius:9px;font-weight:600;font-size:14px;color:var(--muted)}.seg button.on{background:var(--panel);color:var(--txt);box-shadow:0 1px 0 var(--line)}
+  ::-webkit-scrollbar{display:none}
 </style>
 </head>
-<body class="bg-slate-100 text-slate-800">
+<body class="min-h-screen pb-10">
 <div id="banner"></div>
-<header class="bg-slate-900 text-white px-4 py-3 flex items-center justify-between">
-  <div><div class="font-bold text-lg">🤖 Robô de Investimentos</div><div id="sub" class="text-xs text-slate-300"></div></div>
-  <div class="flex gap-2">
-    <button class="btn bg-amber-500 text-slate-900" onclick="togglePause()" id="pauseBtn">Pausar</button>
-    <button class="btn bg-red-600" onclick="panic()">Travar</button>
-    <button class="btn bg-slate-700" onclick="logout()" title="Sair">Sair</button>
+
+<header class="px-4 pt-4 pb-3" style="padding-top:max(16px,env(safe-area-inset-top))">
+  <div class="flex items-center justify-between gap-3">
+    <div class="flex items-center gap-3 min-w-0">
+      <div class="w-10 h-10 rounded-xl flex items-center justify-center text-xl shrink-0" style="background:linear-gradient(135deg,#0ea5e9,#22c55e)">📈</div>
+      <div class="min-w-0"><div class="font-bold text-lg leading-tight">Robô de Investimentos</div>
+        <div id="sub" class="text-xs muted truncate"></div></div>
+    </div>
+    <div class="flex gap-2 shrink-0">
+      <button class="btn text-slate-900" style="background:var(--warn)" onclick="togglePause()" id="pauseBtn" title="Pausar">⏸</button>
+      <button class="btn text-white" style="background:var(--down)" onclick="panic()" title="Travar">🛑</button>
+      <button class="btn" style="background:var(--panel2)" onclick="logout()" title="Sair">⎋</button>
+    </div>
   </div>
 </header>
-<nav class="flex gap-1 overflow-x-auto px-2 py-2 bg-white border-b text-sm" id="tabs"></nav>
-<main class="p-3 max-w-6xl mx-auto space-y-3" id="main"></main>
-<div id="toast" class="fixed bottom-4 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-sm px-4 py-2 rounded-lg hidden"></div>
+
+<div class="overflow-hidden border-y" style="border-color:var(--line);background:#0d1424"><div id="ticker" class="tick py-2 px-4 text-sm num muted">Carregando cotações…</div></div>
+<nav class="flex gap-1 overflow-x-auto px-3 py-2 sticky top-0 z-10" id="tabs" style="background:rgba(10,15,28,.92);backdrop-filter:blur(8px)"></nav>
+<main class="px-3 max-w-6xl mx-auto space-y-3" id="main"></main>
+<div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 text-sm px-4 py-2 rounded-xl hidden z-50" style="background:var(--panel2);border:1px solid var(--line)"></div>
 
 <script>
-const TABS=[["home","Visão geral"],["signals","Sinais"],["positions","Posições"],["strategies","Estratégias"],["us","Pesquisa EUA"],["finance","Finanças"],["settings","Configurações"],["logs","Registro"]];
-let tab="home", S=null, chart=null;
+const TABS=[["home","Painel"],["wallet","Carteira"],["market","Mercado"],["signals","Sinais"],["positions","Posições"],["strategies","Estratégias"],["us","Pesquisa EUA"],["finance","Finanças"],["settings","Ajustes"],["logs","Registro"]];
+let tab="home",S=null,charts=[],lwc=null,sel=null,wmode="paper";
 const $=s=>document.querySelector(s);
-const fmt=(v,d=2)=>v==null?"-":Number(v).toLocaleString("pt-BR",{minimumFractionDigits:d,maximumFractionDigits:d});
-const pct=v=>v==null?"-":(v*100).toFixed(2)+"%";
-const cls=v=>v>0?"pos":v<0?"neg":"";
-const STA={pending:"aguardando",executed:"executado",rejected:"recusado",expired:"expirou",failed:"falhou",cancelled:"cancelado"};
+const fmt=(v,d=2)=>v==null||isNaN(v)?"-":Number(v).toLocaleString("pt-BR",{minimumFractionDigits:d,maximumFractionDigits:d});
+const px=v=>v==null?"-":fmt(v,v<1?6:v<100?4:2);
+const pct=v=>v==null||isNaN(v)?"-":(v>0?"+":"")+(v*100).toFixed(2)+"%";
+const cls=v=>v>0?"up":v<0?"down":"";
 const dt=s=>s?new Date(s).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}):"";
+const ago=s=>{if(!s)return"";const m=Math.round((Date.now()-new Date(s))/60000);return m<1?"agora":m<60?m+" min":m<1440?Math.round(m/60)+" h":Math.round(m/1440)+" d"};
+const MK={main:"Cripto",us:"EUA",b3:"B3"};
+const STA={pending:"aguardando",executed:"executado",rejected:"recusado",expired:"expirou",failed:"falhou",cancelled:"cancelado"};
 async function api(p,opt={}){const r=await fetch(p,{headers:{"Content-Type":"application/json"},...opt});if(r.status==401||r.status==403){location.href="/login";throw new Error("login")}const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.detail||r.statusText);return j}
 const post=(p,b)=>api(p,{method:"POST",body:JSON.stringify(b||{})});
 function toast(m){const t=$("#toast");t.textContent=m;t.classList.remove("hidden");setTimeout(()=>t.classList.add("hidden"),4000)}
-function renderTabs(){$("#tabs").innerHTML=TABS.map(([k,l])=>`<button class="tab px-3 py-1.5 rounded-lg whitespace-nowrap ${k==tab?"active":""}" onclick="go('${k}')">${l}${k=="signals"&&S&&S.pending?` <span class="bg-red-500 text-white rounded-full px-1.5 text-xs">${S.pending}</span>`:""}</button>`).join("")}
-function go(k){tab=k;render()}
+function killCharts(){charts.forEach(c=>{try{c.destroy?c.destroy():c.remove()}catch(e){}});charts=[];lwc=null}
+function renderTabs(){$("#tabs").innerHTML=TABS.map(([k,l])=>`<button class="tab ${k==tab?"active":""}" onclick="go('${k}')">${l}${k=="signals"&&S&&S.pending?` <span class="chip text-white" style="background:var(--down)">${S.pending}</span>`:""}</button>`).join("")}
+function go(k){tab=k;sel=null;render();window.scrollTo(0,0)}
 
-async function load(){S=await api("/api/status");
-  const st=S.settings;
-  $("#sub").textContent=`${S.trading_mode=="live"?"DINHEIRO REAL":"SIMULAÇÃO"} · ${S.broker} · modo ${st.execution_mode=="auto"?"AUTOMÁTICO":"MANUAL (você aprova)"} · ciclo ${dt(S.last_cycle)}`;
+function spark(vals,w=90,h=28){if(!vals||vals.length<2)return"";const mn=Math.min(...vals),mx=Math.max(...vals),r=mx-mn||1;
+  const pts=vals.map((v,i)=>`${(i/(vals.length-1)*w).toFixed(1)},${(h-(v-mn)/r*h).toFixed(1)}`).join(" ");
+  const c=vals[vals.length-1]>=vals[0]?"var(--up)":"var(--down)";
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><polyline fill="none" stroke="${c}" stroke-width="1.8" points="${pts}"/></svg>`}
+
+async function load(){S=await api("/api/status");const st=S.settings;
+  $("#sub").textContent=`${S.trading_mode=="live"?"● DINHEIRO REAL":"● Simulação"} · ${st.execution_mode=="auto"?"Automático":"Manual"} · ${dt(S.last_cycle)}`;
   let b="";
-  if(S.trading_mode=="live")b+=`<div class="bg-red-600 text-white text-center text-sm py-1">⚠️ MODO REAL: as ordens usam seu dinheiro</div>`;
-  if(st.kill_switch=="true")b+=`<div class="bg-red-800 text-white text-center text-sm py-1">🛑 TRAVA DE SEGURANÇA LIGADA — nenhuma compra nova. Destrave em Configurações.</div>`;
-  if(st.paused=="true")b+=`<div class="bg-amber-400 text-center text-sm py-1">⏸️ Robô pausado</div>`;
-  if(S.last_error)b+=`<div class="bg-orange-200 text-center text-xs py-1">Último erro: ${S.last_error}</div>`;
-  $("#banner").innerHTML=b; $("#pauseBtn").textContent=st.paused=="true"?"Retomar":"Pausar";
-  renderTabs();}
+  if(S.trading_mode=="live")b+=`<div class="text-center text-sm py-1 text-white" style="background:var(--down)">⚠️ MODO REAL: as ordens usam seu dinheiro</div>`;
+  if(st.kill_switch=="true")b+=`<div class="text-center text-sm py-1 text-white" style="background:#7f1d1d">🛑 Trava de segurança ligada: nenhuma compra nova. Destrave em Ajustes.</div>`;
+  if(st.paused=="true")b+=`<div class="text-center text-sm py-1 text-slate-900" style="background:var(--warn)">⏸ Robô pausado</div>`;
+  $("#banner").innerHTML=b;$("#pauseBtn").textContent=st.paused=="true"?"▶":"⏸";renderTabs();loadTicker()}
 
-async function render(){await load();const m=$("#main");m.innerHTML="";
-  ({home,signals,positions,strategies,us,finance,settings,logs})[tab](m)}
+async function loadTicker(){try{const w=await api("/api/market/watchlist");if(!w.length)return;
+  const it=w.map(r=>`<span><b style="color:var(--txt)">${r.name}</b> ${px(r.price)} <span class="${cls(r.change_24h)}">${pct(r.change_24h)}</span></span>`).join("");
+  $("#ticker").innerHTML=it+it}catch(e){}}
 
-function kpi(l,v,c=""){return `<div class="card"><div class="text-xs text-slate-500">${l}</div><div class="text-xl font-bold ${c}">${v}</div></div>`}
+async function render(){killCharts();await load();const m=$("#main");m.innerHTML="";
+  ({home,wallet,market,signals,positions,strategies,us,finance,settings,logs})[tab](m)}
 
+function kpi(l,v,c="",sub=""){return `<div class="card"><div class="text-xs muted">${l}</div><div class="kpi-v num ${c}">${v}</div>${sub?`<div class="text-xs muted mt-0.5 truncate">${sub}</div>`:""}</div>`}
+
+/* ------------------------------- PAINEL ------------------------------- */
 async function home(m){
-  m.innerHTML=`<div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-    ${kpi("Patrimônio",fmt(S.equity))}${kpi("Lucro total",fmt(S.profit),cls(S.profit))}
-    ${kpi("Resultado hoje",fmt(S.day_pnl),cls(S.day_pnl))}${kpi("Queda desde o topo",pct(S.drawdown),S.drawdown>0.1?"neg":"")}
-    ${kpi("Caixa",fmt(S.cash))}${kpi("Aportado",fmt(S.deposits))}${kpi("Lucro realizado",fmt(S.realized_pnl),cls(S.realized_pnl))}${kpi("Taxas pagas",fmt(S.fees))}</div>
-    <div class="card"><div class="font-semibold mb-2">Por mercado <span class="text-xs text-slate-500 font-normal">(cada um na sua moeda)</span></div>${(S.by_market||[]).map(m=>`<div class="flex justify-between border-t py-1.5 text-sm"><span>${m.label}</span><span><b>${fmt(m.equity)}</b> <span class="text-xs text-slate-500">caixa ${fmt(m.cash)}</span></span></div>`).join("")}</div>
-    <div class="card"><div class="font-semibold mb-2">Evolução do patrimônio</div><canvas id="eq" height="110"></canvas></div>
-    <div class="card"><div class="font-semibold mb-2">Sinais aguardando você</div><div id="pend"></div></div>
-    ${S.trading_mode=="paper"?`<div class="card"><div class="font-semibold mb-1">Pronto para dinheiro real?</div><div id="ready" class="text-sm text-slate-500">Conferindo...</div></div>`:""}`;
-  if(S.trading_mode=="paper")api("/api/readiness").then(r=>{$("#ready").innerHTML=`<div class="font-bold mb-2 ${r.ready?"pos":"text-amber-700"}">${r.ready?"✅ Sim":"⏳ Ainda não"}</div>`+r.items.map(i=>`<div class="flex justify-between gap-2 border-t py-1.5"><span>${i.ok?"✅":"⏳"} ${i.label}</span><span class="text-xs text-slate-500 text-right">${i.value}</span></div>`).join("")+`<div class="text-xs mt-2">${r.advice}</div>`}).catch(()=>{});
+  const ret=S.deposits?S.profit/S.deposits:0;
+  m.innerHTML=`
+  <div class="card glow" style="background:linear-gradient(135deg,#0f1b33,#0b1324)">
+    <div class="flex justify-between items-start"><div><div class="text-xs muted">Patrimônio total</div>
+      <div class="text-3xl font-bold num mt-1">${fmt(S.equity)}</div>
+      <div class="text-sm mt-1 num ${cls(S.profit)}">${S.profit>=0?"▲":"▼"} ${fmt(Math.abs(S.profit))} (${pct(ret)}) no total</div></div>
+      <div class="text-right"><div class="text-xs muted">Hoje</div><div class="font-semibold num ${cls(S.day_pnl)}">${fmt(S.day_pnl)}</div></div></div>
+    <div class="mt-3" style="height:150px"><canvas id="eq"></canvas></div>
+  </div>
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+    ${kpi("Lucro realizado",fmt(S.realized_pnl),cls(S.realized_pnl))}${kpi("Queda desde o topo",pct(-S.drawdown),S.drawdown>0.1?"down":"","limite "+(S.settings.max_drawdown_pct*100)+"%")}
+    ${kpi("Posições abertas",S.positions.length,"",S.positions.map(p=>p.symbol).join(", ")||"nenhuma")}${kpi("Taxas pagas",fmt(S.fees))}
+  </div>
+  <div class="grid md:grid-cols-2 gap-3">
+    <div class="card"><div class="font-semibold mb-2">Por mercado <span class="text-xs muted font-normal">(cada um na sua moeda)</span></div>
+      <div class="flex items-center gap-4"><div style="width:110px;height:110px" class="shrink-0"><canvas id="alloc"></canvas></div>
+      <div class="flex-1 space-y-2 min-w-0">${(S.by_market||[]).map((x,i)=>`<div><div class="flex justify-between text-sm"><span><span class="inline-block w-2.5 h-2.5 rounded-full mr-1.5" style="background:${["#38bdf8","#a78bfa","#22c55e"][i%3]}"></span>${x.label}</span><span class="num font-semibold">${fmt(x.equity)}</span></div><div class="text-xs muted text-right num">caixa ${fmt(x.cash)} · investido ${fmt(x.equity-x.cash)}</div></div>`).join("")}</div></div></div>
+    <div class="card"><div class="flex justify-between items-center mb-2"><div class="font-semibold">Desempenho</div><div class="text-xs muted" id="st0"></div></div>
+      <div class="grid grid-cols-3 gap-2 text-center mb-2" id="st1"></div><div style="height:90px"><canvas id="pnls"></canvas></div></div>
+  </div>
+  <div class="card"><div class="flex justify-between items-center mb-1"><div class="font-semibold">Mercado agora</div><button class="text-xs" style="color:var(--acc)" onclick="go('market')">ver gráficos →</button></div><div id="wl" class="text-sm muted">Carregando cotações...</div></div>
+  <div class="card"><div class="font-semibold mb-2">Sinais aguardando você</div><div id="pend"></div></div>
+  ${S.trading_mode=="paper"?`<div class="card"><div class="font-semibold mb-1">Pronto para dinheiro real?</div><div id="ready" class="text-sm muted">Conferindo...</div></div>`:""}`;
   sigTable($("#pend"),await api("/api/signals?status=pending"));
-  const eq=await api("/api/equity");
-  if(chart)chart.destroy();
-  if(typeof Chart=="undefined")return;
-  chart=new Chart($("#eq"),{type:"line",data:{labels:eq.map(e=>dt(e.ts)),datasets:[{data:eq.map(e=>e.equity),borderColor:"#0f172a",borderWidth:2,pointRadius:0,fill:{target:"origin",above:"rgba(15,23,42,.06)"}}]},options:{plugins:{legend:{display:false}},scales:{x:{ticks:{maxTicksLimit:6}}}}});
+  const [eq,stt,wl]=await Promise.all([api("/api/equity"),api("/api/stats"),api("/api/market/watchlist").catch(()=>[])]);
+  const g=$("#eq").getContext("2d").createLinearGradient(0,0,0,150);g.addColorStop(0,"rgba(56,189,248,.35)");g.addColorStop(1,"rgba(56,189,248,0)");
+  charts.push(new Chart($("#eq"),{type:"line",data:{labels:eq.map(e=>dt(e.ts)),datasets:[{data:eq.map(e=>e.equity),borderColor:"#38bdf8",borderWidth:2,pointRadius:0,fill:true,backgroundColor:g,tension:.3}]},options:{maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{display:false},y:{ticks:{color:"#8b97ad",maxTicksLimit:4},grid:{color:"#1f2a3d"}}}}}));
+  charts.push(new Chart($("#alloc"),{type:"doughnut",data:{labels:(S.by_market||[]).map(x=>x.label),datasets:[{data:(S.by_market||[]).map(x=>x.equity),backgroundColor:["#38bdf8","#a78bfa","#22c55e"],borderWidth:0}]},options:{cutout:"72%",plugins:{legend:{display:false}}}}));
+  $("#st0").textContent=`${stt.trades} operações fechadas`;
+  $("#st1").innerHTML=[["Acerto",stt.trades?(stt.win_rate*100).toFixed(0)+"%":"-"],["Fator lucro",stt.profit_factor?fmt(stt.profit_factor):"-"],["Melhor",fmt(stt.best)]].map(([a,b])=>`<div class="rounded-xl py-2" style="background:var(--panel2)"><div class="text-xs muted">${a}</div><div class="font-semibold num">${b}</div></div>`).join("");
+  charts.push(new Chart($("#pnls"),{type:"bar",data:{labels:stt.last_pnls.map((_,i)=>i+1),datasets:[{data:stt.last_pnls,backgroundColor:stt.last_pnls.map(v=>v>=0?"#22c55e":"#ef4444"),borderRadius:3}]},options:{maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{display:false},y:{display:false}}}}));
+  $("#wl").innerHTML=wl.length?watchRows(wl.slice(0,8)):"Aguardando o primeiro ciclo do robô.";
+  if(S.trading_mode=="paper")api("/api/readiness").then(r=>{$("#ready").innerHTML=`<div class="font-bold mb-2" style="color:${r.ready?"var(--up)":"var(--warn)"}">${r.ready?"✅ Sim":"⏳ Ainda não"}</div>`+r.items.map(i=>`<div class="flex justify-between gap-2 py-1.5" style="border-top:1px solid var(--line)"><span>${i.ok?"✅":"⏳"} ${i.label}</span><span class="text-xs muted text-right">${i.value}</span></div>`).join("")+`<div class="text-xs mt-2">${r.advice}</div>`}).catch(()=>{});
+}
+function watchRows(w){return w.map(r=>`<div class="flex items-center justify-between py-2 cursor-pointer gap-2" style="border-top:1px solid var(--line)" onclick="openChart('${r.market}','${r.symbol}')">
+  <div class="min-w-0"><div class="font-semibold text-[15px] flex items-center gap-1.5" style="color:var(--txt)">${r.name}${r.position?`<span class="chip" style="background:rgba(34,197,94,.15);color:var(--up)">posição</span>`:""}</div>
+  <div class="text-xs muted truncate">${r.index?"Índice":MK[r.market]||r.market}${r.strategy?" · "+r.strategy:""}</div></div>
+  <div class="flex items-center gap-3 shrink-0">${spark(r.spark,70)}<div class="text-right num w-24"><div style="color:var(--txt)">${px(r.price)}</div><div class="text-xs ${cls(r.change_24h)}">${pct(r.change_24h)}</div></div></div></div>`).join("")}
+
+/* ------------------------------- CARTEIRA ----------------------------- */
+async function wallet(m){
+  const P=await api("/api/portfolio");const W=P[wmode];
+  const hasLive=P.live.markets.length||P.live.positions.length||P.live.trades.length;
+  m.innerHTML=`<div class="seg"><button class="${wmode=="live"?"on":""}" onclick="wmode='live';render()">💵 Dinheiro real</button><button class="${wmode=="paper"?"on":""}" onclick="wmode='paper';render()">🧪 Fictício (simulação)</button></div>
+  <div class="flex items-center gap-2 text-xs muted px-1"><span class="live-dot"></span> Atualizando a cada 10 segundos</div>
+  ${wmode=="live"&&!hasLive?`<div class="card text-sm"><div class="font-semibold mb-1">Nenhum dinheiro real ainda</div><div class="muted">Quando você conectar a corretora com dinheiro real, cada investimento aparece aqui, separado da simulação. Siga a Fase 6 do guia, depois que o cartão "Pronto para dinheiro real?" ficar verde.</div></div>`:`
+  <div class="grid grid-cols-2 gap-3">${kpi("Resultado em aberto",fmt(W.open_pnl),cls(W.open_pnl),W.positions.length+" posição(ões) agora")}${kpi("Lucro realizado",fmt(W.realized),cls(W.realized),W.closed+" operação(ões) fechada(s)")}</div>
+  <div class="card"><div class="font-semibold mb-2">Saldo por mercado</div>${W.markets.map(x=>`<div class="flex justify-between py-1.5 text-sm" style="border-top:1px solid var(--line)"><span>${MK[x.market]||x.market} <span class="muted">(${x.currency})</span></span><span class="num"><b>${fmt(x.equity)}</b> <span class="text-xs muted">caixa ${fmt(x.cash)}</span></span></div>`).join("")||'<div class="text-sm muted">—</div>'}</div>
+  <div class="font-semibold px-1 pt-1">Investimentos abertos</div>
+  ${W.positions.map(p=>`<div class="card" onclick="openChart('${p.market}','${p.symbol}')"><div class="flex justify-between items-start gap-2">
+     <div class="min-w-0"><div class="font-bold text-[15px]">${p.symbol} <span class="chip" style="background:var(--panel2)">${MK[p.market]||p.market}</span></div><div class="text-xs muted">comprado há ${ago(p.opened_ts)} · ${p.strategy||""}</div></div>
+     <div class="text-right num shrink-0"><div class="text-lg font-bold ${cls(p.pnl)}">${p.pnl>=0?"+":""}${fmt(p.pnl)}</div><div class="text-xs ${cls(p.pnl_pct)}">${pct(p.pnl_pct)}</div></div></div>
+     <div class="grid grid-cols-3 gap-2 text-xs mt-3 num">${[["Investido",p.currency+" "+fmt(p.invested)],["Vale agora",p.currency+" "+fmt(p.value)],["Preço",px(p.price)]].map(([a,b])=>`<div><div class="muted">${a}</div><div style="color:var(--txt)">${b}</div></div>`).join("")}</div>
+     ${p.stop?`<div class="mt-2 h-1.5 rounded-full overflow-hidden" style="background:var(--panel2)"><div style="width:${Math.max(3,Math.min(100,(p.price-p.stop)/((p.take||p.price*1.1)-p.stop)*100))}%;height:100%;background:linear-gradient(90deg,var(--down),var(--up))"></div></div><div class="flex justify-between text-[11px] muted mt-1 num"><span>stop ${px(p.stop)}</span><span>alvo ${p.take?px(p.take):"-"}</span></div>`:""}</div>`).join("")||'<div class="card text-sm muted">Nenhum investimento aberto agora. O robô compra quando a estratégia dá sinal.</div>'}
+  <div class="card"><div class="font-semibold mb-2">Cada operação</div>${W.trades.map(t=>`<div class="flex justify-between items-center py-2 gap-2" style="border-top:1px solid var(--line)">
+     <div class="min-w-0"><div class="text-sm"><span class="${t.side=="buy"?"up":"down"} font-semibold">${t.side=="buy"?"Comprou":"Vendeu"}</span> ${t.symbol} <span class="chip" style="background:var(--panel2)">${MK[t.market]||t.market}</span></div><div class="text-xs muted truncate">${dt(t.ts)} · ${fmt(t.qty,4)} × ${px(t.price)}</div></div>
+     <div class="text-right num shrink-0 text-sm">${t.side=="sell"?`<span class="${cls(t.pnl)} font-semibold">${t.pnl>=0?"+":""}${fmt(t.pnl)}</span>`:`<span class="muted">${fmt(t.qty*t.price)}</span>`}</div></div>`).join("")||'<div class="text-sm muted">Nenhuma operação ainda.</div>'}</div>`}`;
 }
 
+/* ------------------------------- MERCADO ------------------------------ */
+async function market(m){
+  const w=await api("/api/market/watchlist").catch(()=>[]);
+  if(!sel&&w.length){const f=w.find(r=>!r.index)||w[0];sel={market:f.market,symbol:f.symbol}}
+  const groups={};w.forEach(r=>{const k=r.index?"Índices":MK[r.market]||r.market;(groups[k]=groups[k]||[]).push(r)});
+  m.innerHTML=`<div class="card p-0 overflow-hidden"><div class="flex justify-between items-center px-4 pt-3"><div><div class="font-bold text-lg" id="cTitle">${sel?sel.symbol:"-"}</div><div class="text-xs muted" id="cSub"></div></div>
+     <div class="text-right"><div class="font-bold num text-lg" id="cPx"></div><div class="text-xs num" id="cCh"></div></div></div>
+     <div id="chart" style="height:340px"></div>
+     <div class="flex gap-3 text-xs muted px-4 pb-3 flex-wrap"><span><span style="color:#f59e0b">━</span> média 50</span><span><span class="up">▲</span> compra do robô</span><span><span class="down">▼</span> venda do robô</span><span><span class="down">┅</span> stop</span><span><span class="up">┅</span> alvo</span></div></div>
+   ${Object.entries(groups).map(([k,rows])=>`<div class="card"><div class="font-semibold mb-1">${k}</div>${watchRows(rows)}</div>`).join("")||`<div class="card muted text-sm">Aguardando o primeiro ciclo do robô para mostrar as cotações.</div>`}`;
+  if(sel)drawChart(sel.market,sel.symbol,w.find(r=>r.symbol==sel.symbol));
+}
+function openChart(mk,sy){sel={market:mk,symbol:sy};if(tab!="market"){tab="market";killCharts();load().then(()=>market($("#main")))}else{killCharts();market($("#main"))}window.scrollTo(0,0)}
+async function drawChart(mk,sy,row){
+  let d;try{d=await api(`/api/market/candles?symbol=${encodeURIComponent(sy)}&market=${mk}`)}catch(e){$("#chart").innerHTML=`<div class="p-6 text-sm muted">${e.message}</div>`;return}
+  $("#cTitle").textContent=row?row.name:sy;$("#cSub").textContent=(row&&row.index?"Índice":MK[mk]||mk)+(row&&row.strategy?" · estratégia "+row.strategy:"");
+  if(row){$("#cPx").textContent=px(row.price);$("#cCh").innerHTML=`<span class="${cls(row.change_24h)}">${pct(row.change_24h)} 24h</span>`}
+  const el=$("#chart");
+  lwc=LightweightCharts.createChart(el,{width:el.clientWidth,height:340,layout:{background:{color:"#111827"},textColor:"#8b97ad",fontSize:11},grid:{vertLines:{color:"#1a2436"},horzLines:{color:"#1a2436"}},rightPriceScale:{borderColor:"#1f2a3d"},timeScale:{borderColor:"#1f2a3d",timeVisible:true},crosshair:{mode:0}});
+  charts.push(lwc);
+  const c=lwc.addCandlestickSeries({upColor:"#22c55e",downColor:"#ef4444",borderVisible:false,wickUpColor:"#22c55e",wickDownColor:"#ef4444"});
+  c.setData(d.bars);
+  lwc.addLineSeries({color:"#f59e0b",lineWidth:1.5,priceLineVisible:false,lastValueVisible:false}).setData(d.ema.filter(x=>x.value));
+  const times=d.bars.map(b=>b.time);
+  const near=t=>{const s=Date.parse(t)/1000;let best=times[0];for(const x of times){if(x<=s)best=x;else break}return best};
+  c.setMarkers(d.trades.filter(t=>Date.parse(t.ts)/1000>=times[0]).map(t=>({time:near(t.ts),position:t.side=="buy"?"belowBar":"aboveBar",color:t.side=="buy"?"#22c55e":"#ef4444",shape:t.side=="buy"?"arrowUp":"arrowDown",text:t.side=="buy"?"C":"V "+fmt(t.pnl)})).sort((a,b)=>a.time-b.time));
+  if(d.position){if(d.position.stop)c.createPriceLine({price:d.position.stop,color:"#ef4444",lineStyle:2,title:"stop"});
+    if(d.position.take)c.createPriceLine({price:d.position.take,color:"#22c55e",lineStyle:2,title:"alvo"});
+    c.createPriceLine({price:d.position.avg_price,color:"#38bdf8",lineStyle:1,title:"entrada"})}
+  lwc.timeScale().fitContent();
+  window.onresize=()=>lwc&&lwc.applyOptions({width:el.clientWidth});
+}
+
+/* ------------------------------- SINAIS ------------------------------- */
 function sigTable(el,rows){
-  if(!rows.length){el.innerHTML=`<div class="text-sm text-slate-500">Nada pendente.</div>`;return}
-  el.innerHTML=rows.map(s=>`<div class="border rounded-xl p-3 mb-2 ${s.side=="buy"?"border-emerald-300":"border-rose-300"}">
-   <div class="flex justify-between"><b>#${s.id} ${s.side=="buy"?"🟢 COMPRAR":"🔴 VENDER"} ${s.symbol}</b><span class="text-xs text-slate-500">${({us:"EUA · ",b3:"B3 · "})[s.market]||""}${dt(s.ts)} · ${STA[s.status]||s.status}</span></div>
-   <div class="text-sm mt-1">Qtd ${fmt(s.qty,6)} @ ~${fmt(s.price,4)}${s.notional?` · US$ ${fmt(s.notional)}`:""}${s.stop?` · stop ${fmt(s.stop,4)} · alvo ${fmt(s.take,4)}`:""}</div>
-   <div class="text-xs text-slate-500 mt-1">${s.strategy} — ${s.reason||""}${s.note?` · <span class="neg">${s.note}</span>`:""}</div>
-   ${s.status=="pending"?`<div class="flex gap-2 mt-2"><button class="btn bg-emerald-600 text-white" onclick="act(${s.id},'approve')">✅ Aprovar</button><button class="btn bg-slate-200" onclick="act(${s.id},'reject')">Recusar</button></div>`:""}</div>`).join("")}
+  if(!rows.length){el.innerHTML=`<div class="text-sm muted">Nada pendente.</div>`;return}
+  el.innerHTML=rows.map(s=>`<div class="rounded-xl p-3 mb-2" style="background:var(--panel2);border-left:3px solid ${s.side=="buy"?"var(--up)":"var(--down)"}">
+   <div class="flex justify-between gap-2"><b>${s.side=="buy"?"🟢 Comprar":"🔴 Vender"} ${s.symbol}</b><span class="text-xs muted">${MK[s.market]||""} · ${dt(s.ts)} · ${STA[s.status]||s.status}</span></div>
+   <div class="text-sm mt-1 num">Qtd ${fmt(s.qty,4)} @ ~${px(s.price)}${s.notional?` · US$ ${fmt(s.notional)}`:""}${s.stop?` · <span class="down">stop ${px(s.stop)}</span> · <span class="up">alvo ${px(s.take)}</span>`:""}</div>
+   <div class="text-xs muted mt-1">${s.strategy} — ${s.reason||""}${s.note?` · <span class="down">${s.note}</span>`:""}</div>
+   ${s.status=="pending"?`<div class="flex gap-2 mt-2"><button class="btn text-white" style="background:var(--up)" onclick="act(${s.id},'approve')">✅ Aprovar</button><button class="btn" style="background:var(--line)" onclick="act(${s.id},'reject')">Recusar</button><button class="btn" style="background:var(--line)" onclick="openChart('${s.market}','${s.symbol}')">📈</button></div>`:""}</div>`).join("")}
 async function act(id,a){try{const r=await post(`/api/signals/${id}/${a}`);toast(r.message)}catch(e){toast(e.message)}render()}
-
 async function signals(m){m.innerHTML=`<div class="card"><div class="font-semibold mb-2">Pendentes</div><div id="p"></div></div><div class="card"><div class="font-semibold mb-2">Histórico</div><div id="h"></div></div>`;
-  sigTable($("#p"),await api("/api/signals?status=pending"));
-  sigTable($("#h"),(await api("/api/signals?limit=60")).filter(s=>s.status!="pending"))}
+  sigTable($("#p"),await api("/api/signals?status=pending"));sigTable($("#h"),(await api("/api/signals?limit=60")).filter(s=>s.status!="pending"))}
 
-async function positions(m){
-  const t=await api("/api/trades?limit=100");
-  m.innerHTML=`<div class="card overflow-x-auto"><div class="font-semibold mb-2">Posições abertas</div><table><tr><th>Ativo</th><th>Qtd</th><th>Preço médio</th><th>Atual</th><th>Resultado</th><th>Stop</th><th>Alvo</th><th></th></tr>
-  ${S.positions.map(p=>`<tr><td><b>${p.symbol}</b><div class="text-xs text-slate-500">${({us:"EUA",b3:"B3"})[p.market]||""} ${p.strategy||""}</div></td><td>${fmt(p.qty,4)}</td><td>${fmt(p.avg_price,4)}</td><td>${fmt(p.price,4)}</td><td class="${cls(p.pnl)}">${fmt(p.pnl)} (${pct(p.pnl_pct)})</td><td>${p.stop?fmt(p.stop,4):"-"}</td><td>${p.take?fmt(p.take,4):"-"}</td><td><button class="btn bg-rose-100 text-rose-700" onclick="closePos('${p.symbol}')">Vender</button></td></tr>`).join("")||`<tr><td colspan=8 class="text-slate-500">Nenhuma posição.</td></tr>`}</table></div>
-  <div class="card overflow-x-auto"><div class="font-semibold mb-2">Operações</div><table><tr><th>Data</th><th>Ativo</th><th>Lado</th><th>Qtd</th><th>Preço</th><th>Taxa</th><th>Resultado</th></tr>
-  ${t.map(x=>`<tr><td>${dt(x.ts)}</td><td>${x.symbol}</td><td>${x.side=="buy"?"Compra":"Venda"}</td><td>${fmt(x.qty,4)}</td><td>${fmt(x.price,4)}</td><td>${fmt(x.fee)}</td><td class="${cls(x.pnl)}">${x.side=="sell"?fmt(x.pnl):""}</td></tr>`).join("")}</table></div>`}
+/* ------------------------------ POSIÇÕES ------------------------------ */
+async function positions(m){const t=await api("/api/trades?limit=100");
+  m.innerHTML=`<div class="space-y-2">${S.positions.map(p=>`<div class="card"><div class="flex justify-between items-start"><div><div class="font-bold">${p.symbol} <span class="chip" style="background:var(--panel2)">${MK[p.market]||p.market}</span></div><div class="text-xs muted">${p.strategy||""} · desde ${dt(p.opened_ts)}</div></div>
+     <div class="text-right num"><div class="font-bold ${cls(p.pnl)}">${fmt(p.pnl)}</div><div class="text-xs ${cls(p.pnl_pct)}">${pct(p.pnl_pct)}</div></div></div>
+     <div class="grid grid-cols-4 gap-2 text-xs mt-3 num">${[["Qtd",fmt(p.qty,4)],["Entrada",px(p.avg_price)],["Atual",px(p.price)],["Stop",p.stop?px(p.stop):"-"]].map(([a,b])=>`<div><div class="muted">${a}</div><div>${b}</div></div>`).join("")}</div>
+     <div class="flex gap-2 mt-3"><button class="btn flex-1" style="background:var(--panel2)" onclick="openChart('${p.market}','${p.symbol}')">📈 Gráfico</button><button class="btn flex-1" style="background:rgba(239,68,68,.15);color:var(--down)" onclick="closePos('${p.symbol}')">Vender tudo</button></div></div>`).join("")||`<div class="card muted text-sm">Nenhuma posição aberta.</div>`}</div>
+  <div class="card overflow-x-auto"><div class="font-semibold mb-2">Operações</div><table><tr><th>Data</th><th>Ativo</th><th>Lado</th><th>Qtd</th><th>Preço</th><th>Resultado</th></tr>
+  ${t.map(x=>`<tr class="num"><td class="muted">${dt(x.ts)}</td><td>${x.symbol}</td><td class="${x.side=="buy"?"up":"down"}">${x.side=="buy"?"Compra":"Venda"}</td><td>${fmt(x.qty,4)}</td><td>${px(x.price)}</td><td class="${cls(x.pnl)}">${x.side=="sell"?fmt(x.pnl):""}</td></tr>`).join("")}</table></div>`}
 async function closePos(s){if(!confirm(`Vender toda a posição de ${s} agora?`))return;toast((await post(`/api/positions/${encodeURIComponent(s)}/close`)).message);render()}
 
+/* ---------------------------- ESTRATÉGIAS ----------------------------- */
 async function strategies(m){const r=await api("/api/strategies");
-  m.innerHTML=`<div class="card"><div class="flex justify-between items-center"><div><div class="font-semibold">Estratégias por ativo</div><div class="text-xs text-slate-500">O robô testa centenas de combinações no passado e valida nos 30% mais recentes, que ele não viu. Só troca a campeã se a nova for claramente melhor.</div></div><button class="btn bg-slate-900 text-white" onclick="evolveNow(this)">Evoluir agora</button></div></div>
-  <div class="card overflow-x-auto"><table><tr><th>Ativo</th><th>Estratégia</th><th>Status</th><th>Retorno (prova)</th><th>Sharpe</th><th>Queda máx</th><th>Ops</th><th></th></tr>
-  ${r.map(s=>`<tr><td>${s.symbol}</td><td><b>${s.name}</b><div class="text-xs text-slate-500">${Object.entries(s.params).map(([k,v])=>k+"="+v).join(", ")}</div></td><td>${({champion:"🏆 ativa",proposed:"🕐 proposta",retired:"aposentada",rejected:"descartada"})[s.status]||s.status}</td><td class="${cls(s.oos_return)}">${pct(s.oos_return)}</td><td>${fmt(s.oos_sharpe)}</td><td>${pct(s.oos_maxdd)}</td><td>${s.oos_trades}</td><td>${s.status=="proposed"?`<button class="btn bg-emerald-600 text-white" onclick="promote(${s.id})">Ativar</button>`:""}</td></tr>`).join("")}</table></div>`}
+  m.innerHTML=`<div class="card"><div class="flex justify-between items-center gap-3"><div><div class="font-semibold">Estratégias por ativo</div><div class="text-xs muted">Testadas no passado e validadas nos 30% mais recentes, que o robô não viu. Só troca a campeã se a nova for claramente melhor.</div></div><button class="btn text-slate-900 shrink-0" style="background:var(--acc)" onclick="evolveNow(this)">Evoluir agora</button></div></div>
+  <div class="space-y-2">${r.map(s=>`<div class="card"><div class="flex justify-between gap-2"><div><b>${s.symbol}</b> · ${s.name}</div><span class="chip" style="background:${s.status=="champion"?"rgba(34,197,94,.15);color:var(--up)":s.status=="proposed"?"rgba(245,158,11,.15);color:var(--warn)":"var(--panel2);color:var(--muted)"}">${({champion:"🏆 ativa",proposed:"🕐 proposta",retired:"aposentada",rejected:"descartada"})[s.status]||s.status}</span></div>
+   <div class="text-xs muted mt-1">${Object.entries(s.params).map(([k,v])=>k+"="+v).join(", ")}</div>
+   <div class="grid grid-cols-4 gap-2 text-xs mt-2 num">${[["Retorno",`<span class="${cls(s.oos_return)}">${pct(s.oos_return)}</span>`],["Sharpe",fmt(s.oos_sharpe)],["Queda máx",pct(-s.oos_maxdd)],["Operações",s.oos_trades]].map(([a,b])=>`<div><div class="muted">${a}</div><div>${b}</div></div>`).join("")}</div>
+   ${s.status=="proposed"?`<button class="btn text-white mt-2" style="background:var(--up)" onclick="promote(${s.id})">Ativar</button>`:""}</div>`).join("")||`<div class="card muted text-sm">Nenhuma estratégia ainda: o robô está evoluindo.</div>`}</div>`}
 async function evolveNow(b){b.disabled=true;b.textContent="Evoluindo...";try{await post("/api/evolve");toast("Evolução concluída")}catch(e){toast(e.message)}render()}
 async function promote(id){await post(`/api/strategies/${id}/promote`);toast("Estratégia ativada");render()}
 
+/* ---------------------------- PESQUISA EUA ---------------------------- */
 async function us(m){
-  if(!S.us_enabled){m.innerHTML=`<div class="card">Módulo EUA desligado (US_ENABLED=false no .env).</div>`;return}
-  const clock=await api("/api/us/clock").catch(()=>({}));
-  const al=await api("/api/us/alerts");
-  m.innerHTML=`<div class="card text-sm"><b>Pesquisa EUA</b> (11 ferramentas do trader-skill integradas). NYSE: ${clock.open?"🟢 aberta":"🔴 fechada"} ${clock.reason?"("+clock.reason+")":""} ${clock.next_open?"· abre "+clock.next_open+" NY":""}
-   ${S.sec_ready?"":`<div class="mt-1 text-amber-700">⚠️ Defina SEC_USER_AGENT no .env ("Seu Nome seu@email.com") para Copycat, Analista e Notícias da SEC.</div>`}
-   <div class="text-xs text-slate-500 mt-1">Todas as ordens daqui passam pelo trader-risk e viram sinais na aba Sinais.</div></div>
+  if(!S.us_enabled){m.innerHTML=`<div class="card">Módulo EUA desligado.</div>`;return}
+  const clock=await api("/api/us/clock").catch(()=>({}));const al=await api("/api/us/alerts");
+  m.innerHTML=`<div class="card text-sm"><b>Pesquisa EUA</b> · NYSE ${clock.open?'<span class="up">● aberta</span>':'<span class="down">● fechada</span>'} ${clock.next_open?'<span class="muted">· abre '+clock.next_open+' NY</span>':""}
+   ${S.sec_ready?"":`<div class="mt-1" style="color:var(--warn)">⚠️ Defina SEC_USER_AGENT no .env para Copycat, Analista e Notícias da SEC.</div>`}
+   <div class="text-xs muted mt-1">As ordens daqui passam pelo trader-risk e viram sinais na aba Sinais.</div></div>
   <div class="grid md:grid-cols-2 gap-3">
-   <div class="card space-y-2"><b>🕵️ Copiar investidor (13F)</b>
-     <div class="flex gap-2"><input id="fq" placeholder="ex: buffett, ackman, burry"><button class="btn bg-slate-200" onclick="findFiler()">Buscar</button></div><div id="fr" class="text-xs"></div>
-     <div class="grid grid-cols-3 gap-2"><input id="cik" placeholder="CIK"><input id="top" type="number" value="5" title="maiores posições"><input id="bud" type="number" placeholder="orçamento US$"></div>
-     <button class="btn bg-slate-900 text-white w-full" onclick="copycat(this)">Gerar sinais de cópia</button><pre id="cr" class="text-xs whitespace-pre-wrap"></pre></div>
-   <div class="card space-y-2"><b>⚖️ Rebalancear / 🧾 Impostos (EUA)</b>
-     <div class="flex gap-2"><input id="band" type="number" value="5" title="banda (pontos %)"><button class="btn bg-slate-900 text-white" onclick="rebal(this)">Rebalancear</button></div>
-     <div class="flex gap-2"><button class="btn bg-slate-200" onclick="taxRep()">Relatório de lotes</button><button class="btn bg-slate-200" onclick="harvest()">Colheita de prejuízo</button></div><pre id="rr" class="text-xs whitespace-pre-wrap max-h-64 overflow-auto"></pre></div>
-   <div class="card space-y-2"><b>📈 Analista de resultados + Filtro</b>
-     <input id="tk" placeholder="AAPL, MSFT, KO"><div class="flex gap-2"><button class="btn bg-slate-900 text-white" onclick="analyst(this)">Analisar</button><button class="btn bg-slate-200" onclick="screen()">Rodar filtro</button></div><pre id="ar" class="text-xs whitespace-pre-wrap max-h-64 overflow-auto"></pre></div>
-   <div class="card space-y-2"><b>🔔 Alertas de preço</b>
-     <div class="grid grid-cols-3 gap-2"><input id="as" placeholder="AAPL"><select id="ak"><option value="above">acima de</option><option value="below">abaixo de</option><option value="stop">stop</option><option value="pct_move">variação %</option></select><input id="av" type="number" placeholder="valor"></div>
-     <button class="btn bg-slate-900 text-white w-full" onclick="addAlert()">Adicionar alerta</button>
-     <div class="flex gap-2 flex-wrap"><button class="btn bg-slate-200" onclick="watch('news')">📰 Checar notícias</button><button class="btn bg-slate-200" onclick="watch('pelosi')">🏛️ Checar Congresso</button><button class="btn bg-slate-200" onclick="watch('alerts')">🔔 Checar alertas</button></div></div>
-  </div>
-  <div class="card"><b>Novidades dos vigias</b><div class="text-sm mt-2">${al.map(a=>`<div class="border-t py-1"><span class="text-xs text-slate-500">${dt(a.ts)} · ${a.source}</span> ${a.url?`<a class="underline" target="_blank" href="${a.url}">${a.title}</a>`:a.title}</div>`).join("")||"<span class='text-slate-500'>Nada ainda.</span>"}</div></div>`}
+   <div class="card space-y-2"><b>🕵️ Copiar investidor (13F)</b><div class="flex gap-2"><input id="fq" placeholder="buffett, ackman, burry"><button class="btn" style="background:var(--panel2)" onclick="findFiler()">Buscar</button></div><pre id="fr" class="text-xs whitespace-pre-wrap muted"></pre>
+     <div class="grid grid-cols-3 gap-2"><input id="cik" placeholder="CIK"><input id="top" type="number" value="5"><input id="bud" type="number" placeholder="US$"></div>
+     <button class="btn w-full text-slate-900" style="background:var(--acc)" onclick="copycat(this)">Gerar sinais de cópia</button><pre id="cr" class="text-xs whitespace-pre-wrap"></pre></div>
+   <div class="card space-y-2"><b>⚖️ Rebalancear · 🧾 Impostos</b><div class="flex gap-2"><input id="band" type="number" value="5"><button class="btn text-slate-900" style="background:var(--acc)" onclick="rebal()">Rebalancear</button></div>
+     <div class="flex gap-2"><button class="btn" style="background:var(--panel2)" onclick="taxRep()">Lotes</button><button class="btn" style="background:var(--panel2)" onclick="harvest()">Colheita de prejuízo</button></div><pre id="rr" class="text-xs whitespace-pre-wrap max-h-64 overflow-auto"></pre></div>
+   <div class="card space-y-2"><b>📊 Analista + Filtro</b><input id="tk" placeholder="AAPL, MSFT, KO"><div class="flex gap-2"><button class="btn text-slate-900" style="background:var(--acc)" onclick="analyst(this)">Analisar</button><button class="btn" style="background:var(--panel2)" onclick="screen()">Filtrar</button></div><pre id="ar" class="text-xs whitespace-pre-wrap max-h-64 overflow-auto"></pre></div>
+   <div class="card space-y-2"><b>🔔 Alertas</b><div class="grid grid-cols-3 gap-2"><input id="as" placeholder="AAPL"><select id="ak"><option value="above">acima</option><option value="below">abaixo</option><option value="stop">stop</option><option value="pct_move">var. %</option></select><input id="av" type="number" placeholder="valor"></div>
+     <button class="btn w-full text-slate-900" style="background:var(--acc)" onclick="addAlert()">Adicionar</button>
+     <div class="flex gap-2 flex-wrap"><button class="btn" style="background:var(--panel2)" onclick="watch('news')">📰 Notícias</button><button class="btn" style="background:var(--panel2)" onclick="watch('pelosi')">🏛️ Congresso</button><button class="btn" style="background:var(--panel2)" onclick="watch('alerts')">🔔 Alertas</button></div></div></div>
+  <div class="card"><b>Novidades dos vigias</b><div class="text-sm mt-2">${al.map(a=>`<div class="py-1.5" style="border-top:1px solid var(--line)"><span class="text-xs muted">${dt(a.ts)} · ${a.source}</span> ${a.url?`<a class="underline" target="_blank" href="${a.url}">${a.title}</a>`:a.title}</div>`).join("")||"<span class='muted'>Nada ainda.</span>"}</div></div>`}
 const show=(id,o)=>{$(id).textContent=typeof o=="string"?o:JSON.stringify(o,null,1).slice(0,6000)};
-async function findFiler(){const r=await api("/api/us/find?q="+encodeURIComponent($("#fq").value));$("#fr").textContent=r.text||r.error}
+async function findFiler(){const r=await api("/api/us/find?q="+encodeURIComponent($("#fq").value));show("#fr",r.text||r.error)}
 async function copycat(b){b.disabled=true;try{const r=await post("/api/us/copycat",{cik:$("#cik").value,top:+$("#top").value,budget:+$("#bud").value||null});show("#cr",r.error||r.message)}catch(e){show("#cr",e.message)}b.disabled=false;load()}
-async function rebal(b){const r=await post("/api/us/rebalance?band="+$("#band").value);show("#rr",r.error||r.message+"\n"+JSON.stringify(r.plan?.rows||[],null,1));load()}
+async function rebal(){const r=await post("/api/us/rebalance?band="+$("#band").value);show("#rr",r.error||r.message)}
 async function taxRep(){const r=await api("/api/us/tax");show("#rr",r.data||r.error)}
 async function harvest(){const r=await post("/api/us/tax/harvest");show("#rr",r.error||r.message)}
 async function analyst(b){b.disabled=true;b.textContent="Lendo SEC...";const r=await post("/api/us/analyst",{tickers:$("#tk").value.split(/[ ,]+/).filter(Boolean)});show("#ar",r.text||r.error);b.disabled=false;b.textContent="Analisar"}
@@ -145,38 +254,43 @@ async function screen(){const r=await post("/api/us/screener",{});show("#ar",r.t
 async function addAlert(){const r=await post("/api/us/alert",{symbol:$("#as").value,kind:$("#ak").value,value:+$("#av").value});toast(r.text||r.error)}
 async function watch(n){const r=await post("/api/us/watch/"+n);toast(r.new+" novidade(s)");render()}
 
+/* ------------------------------ FINANÇAS ------------------------------ */
 async function finance(m){const [mo,cf]=await Promise.all([api("/api/report/monthly"),api("/api/cashflows")]);
-  m.innerHTML=`<div class="card overflow-x-auto"><div class="font-semibold mb-1">Resultado mensal</div><div class="text-xs text-slate-500 mb-2">Base para apuração de imposto (DARF). Confirme regras e alíquotas com um contador.</div>
-  <table><tr><th>Mês</th><th>Mercado</th><th>Lucro realizado</th><th>Total vendido</th><th>Taxas</th><th>Ops</th></tr>${mo.map(r=>`<tr><td>${r.month}</td><td>${({us:"EUA",b3:"B3",main:"Cripto"})[r.market]||r.market}</td><td class="${cls(r.realized_pnl)}">${fmt(r.realized_pnl)}</td><td>${fmt(r.sales)}</td><td>${fmt(r.fees)}</td><td>${r.trades}</td></tr>`).join("")}</table></div>
-  <div class="card space-y-2"><div class="font-semibold">Aportes e retiradas</div><div class="text-xs text-slate-500">Registre aqui quando depositar ou sacar da corretora, para o lucro ser calculado certo. Valor negativo = retirada.</div>
-   <div class="flex gap-2"><input id="cfa" type="number" placeholder="valor"><input id="cfn" placeholder="observação"><button class="btn bg-slate-900 text-white" onclick="addCF()">Salvar</button></div>
-   <table><tr><th>Data</th><th>Valor</th><th>Obs.</th></tr>${cf.map(c=>`<tr><td>${dt(c.ts)}</td><td class="${cls(c.amount)}">${fmt(c.amount)}</td><td>${c.note}</td></tr>`).join("")}</table></div>`}
+  m.innerHTML=`<div class="card"><div class="font-semibold">Resultado mensal</div><div class="text-xs muted mb-2">Base para o DARF. Confirme regras e alíquotas com um contador.</div><div style="height:160px"><canvas id="mchart"></canvas></div>
+  <div class="overflow-x-auto"><table><tr><th>Mês</th><th>Mercado</th><th>Lucro</th><th>Vendido</th><th>Taxas</th></tr>${mo.map(r=>`<tr class="num"><td>${r.month}</td><td>${MK[r.market]||r.market}</td><td class="${cls(r.realized_pnl)}">${fmt(r.realized_pnl)}</td><td>${fmt(r.sales)}</td><td>${fmt(r.fees)}</td></tr>`).join("")}</table></div></div>
+  <div class="card space-y-2"><div class="font-semibold">Aportes e retiradas</div><div class="text-xs muted">Registre quando depositar ou sacar na corretora (negativo = retirada). Assim o lucro e a trava ficam certos.</div>
+   <div class="flex gap-2"><input id="cfa" type="number" placeholder="valor"><input id="cfn" placeholder="observação"><button class="btn text-slate-900" style="background:var(--acc)" onclick="addCF()">Salvar</button></div>
+   <table>${cf.map(c=>`<tr class="num"><td class="muted">${dt(c.ts)}</td><td class="${cls(c.amount)}">${fmt(c.amount)}</td><td>${c.note}</td></tr>`).join("")}</table></div>`;
+  const months=[...new Set(mo.map(r=>r.month))].reverse();
+  charts.push(new Chart($("#mchart"),{type:"bar",data:{labels:months,datasets:Object.keys(MK).map((k,i)=>({label:MK[k],data:months.map(mm=>(mo.find(r=>r.month==mm&&r.market==k)||{}).realized_pnl||0),backgroundColor:["#38bdf8","#a78bfa","#22c55e"][i],borderRadius:4}))},options:{maintainAspectRatio:false,plugins:{legend:{labels:{color:"#8b97ad",boxWidth:10}}},scales:{x:{ticks:{color:"#8b97ad"},grid:{display:false}},y:{ticks:{color:"#8b97ad"},grid:{color:"#1f2a3d"}}}}}))}
 async function addCF(){await post("/api/cashflow",{amount:+$("#cfa").value,note:$("#cfn").value});render()}
 
+/* ------------------------------- AJUSTES ------------------------------ */
 const FIELDS=[["execution_mode","Modo de execução","sel",["manual","auto"]],["auto_evolve","Ativar sozinho estratégias melhores","bool"],["reinvest_profits","Reinvestir lucros (juros compostos)","bool"],
- ["risk_per_trade","Risco por operação (0.01 = 1%)"],["max_position_pct","Máx. por ativo (0.25 = 25%)"],["max_positions","Máx. posições abertas"],["max_daily_loss_pct","Perda diária máx. (para de comprar)"],
+ ["risk_per_trade","Risco por operação (0.01 = 1%)"],["max_position_pct","Máx. por ativo (0.25 = 25%)"],["max_positions","Máx. posições por mercado"],["max_daily_loss_pct","Perda diária máx. (para de comprar)"],
  ["max_drawdown_pct","Queda máx. desde o topo (trava total)"],["atr_stop_mult","Distância do stop (x ATR)"],["take_profit_r","Alvo (x risco)"],["trailing_stop","Stop móvel","bool"],["signal_ttl_minutes","Validade do sinal (min)"],["evolve_every_hours","Evoluir estratégias a cada (h)"],
- ["us_max_position_pct","EUA: máx. por ação (%)"],["us_cash_buffer_pct","EUA: reserva em caixa (%)"],["us_max_order_usd","EUA: ordem máx. (US$)"],["us_max_orders_per_day","EUA: ordens por dia"],["us_blocked","EUA: tickers bloqueados (vírgula)"],
- ["us_watch_news","EUA: vigiar notícias","bool"],["us_watch_pelosi","EUA: vigiar trades do Congresso","bool"],["us_watch_alerts","EUA: vigiar alertas de preço","bool"]];
+ ["us_max_position_pct","EUA: máx. por ação (%)"],["us_cash_buffer_pct","EUA: reserva em caixa (%)"],["us_max_order_usd","EUA: ordem máx. (US$)"],["us_max_orders_per_day","EUA: ordens por dia"],["us_blocked","EUA: tickers bloqueados"],
+ ["us_watch_news","EUA: vigiar notícias","bool"],["us_watch_pelosi","EUA: vigiar Congresso","bool"],["us_watch_alerts","EUA: vigiar alertas","bool"]];
 async function settings(m){const st=S.settings;
-  m.innerHTML=`<div class="card space-y-3"><div class="font-semibold">Configurações</div>
-  <div class="text-xs bg-amber-50 border border-amber-200 rounded-lg p-2">No <b>modo automático</b> o robô compra e vende sozinho, 24h, dentro dos limites abaixo. Stops de proteção são executados na hora em qualquer modo.</div>
-  <div class="grid md:grid-cols-2 gap-3">${FIELDS.map(([k,l,t,o])=>`<label class="text-sm">${l}${t=="sel"?`<select data-k="${k}">${o.map(x=>`<option ${st[k]==x?"selected":""} value="${x}">${x=="auto"?"automático":"manual (eu aprovo)"}</option>`).join("")}</select>`:t=="bool"?`<select data-k="${k}"><option value="true" ${st[k]=="true"?"selected":""}>sim</option><option value="false" ${st[k]!="true"?"selected":""}>não</option></select>`:`<input data-k="${k}" value="${st[k]??""}">`}</label>`).join("")}</div>
-  <button class="btn bg-slate-900 text-white" onclick="saveSettings()">Salvar</button>
-  <button class="btn bg-slate-200 ml-2" onclick="changePw()">Trocar minha senha</button>
-  ${st.kill_switch=="true"?`<button class="btn bg-emerald-600 text-white ml-2" onclick="unlock()">Destravar trava de segurança</button>`:""}</div>`}
+  m.innerHTML=`<div class="card space-y-3"><div class="font-semibold">Ajustes</div>
+  <div class="text-xs rounded-xl p-3" style="background:rgba(245,158,11,.1);color:#fcd34d">No <b>modo automático</b> o robô compra e vende sozinho, dentro dos limites abaixo. Stops de proteção são executados na hora em qualquer modo.</div>
+  <div class="grid md:grid-cols-2 gap-3">${FIELDS.map(([k,l,t,o])=>`<label class="text-sm"><span class="muted text-xs">${l}</span>${t=="sel"?`<select data-k="${k}">${o.map(x=>`<option ${st[k]==x?"selected":""} value="${x}">${x=="auto"?"automático":"manual (eu aprovo)"}</option>`).join("")}</select>`:t=="bool"?`<select data-k="${k}"><option value="true" ${st[k]=="true"?"selected":""}>sim</option><option value="false" ${st[k]!="true"?"selected":""}>não</option></select>`:`<input data-k="${k}" value="${st[k]??""}">`}</label>`).join("")}</div>
+  <div class="flex gap-2 flex-wrap"><button class="btn text-slate-900" style="background:var(--acc)" onclick="saveSettings()">Salvar</button><button class="btn" style="background:var(--panel2)" onclick="changePw()">Trocar minha senha</button>
+  ${st.kill_switch=="true"?`<button class="btn text-white" style="background:var(--up)" onclick="unlock()">Destravar trava</button>`:""}</div></div>`}
 async function saveSettings(){const v={};document.querySelectorAll("[data-k]").forEach(e=>v[e.dataset.k]=e.value);
-  let confirm="";if(v.execution_mode=="auto"&&S.settings.execution_mode!="auto"){confirm=prompt("O robô vai operar SOZINHO com seu dinheiro. Digite CONFIRMO para ligar o modo automático:")||"";if(confirm.toUpperCase()!="CONFIRMO")return}
+  let confirm="";if(v.execution_mode=="auto"&&S.settings.execution_mode!="auto"){confirm=prompt("O robô vai operar SOZINHO. Digite CONFIRMO:")||"";if(confirm.toUpperCase()!="CONFIRMO")return}
   try{await post("/api/settings",{values:v,confirm});toast("Salvo")}catch(e){toast(e.message)}render()}
 async function unlock(){const c=prompt("Digite CONFIRMO para destravar:");try{await post("/api/settings",{values:{kill_switch:"false"},confirm:c||""});toast("Destravado")}catch(e){toast(e.message)}render()}
-async function logout(){await post("/api/logout");location.href="/login"}
-async function changePw(){const o=prompt("Senha atual:");if(!o)return;const n=prompt("Nova senha (mín. 10 caracteres):");if(!n)return;try{await post("/api/password",{old:o,new:n});toast("Senha alterada")}catch(e){toast(e.message)}}
 async function togglePause(){await post("/api/settings",{values:{paused:S.settings.paused=="true"?"false":"true"}});render()}
 async function panic(){if(!confirm("Ligar a trava de segurança? O robô para de abrir posições (stops continuam ativos)."))return;await post("/api/settings",{values:{kill_switch:"true"}});render()}
+async function logout(){await post("/api/logout");location.href="/login"}
+async function changePw(){const o=prompt("Senha atual:");if(!o)return;const n=prompt("Nova senha (mín. 10 caracteres):");if(!n)return;try{await post("/api/password",{old:o,new:n});toast("Senha alterada")}catch(e){toast(e.message)}}
 
-async function logs(m){const l=await api("/api/logs");m.innerHTML=`<div class="card text-xs font-mono">${l.map(x=>`<div class="border-t py-1 ${x.level=="ERROR"?"neg":x.level=="WARN"?"text-amber-700":""}">${dt(x.ts)} ${x.msg}</div>`).join("")}</div>`}
+async function logs(m){const l=await api("/api/logs");m.innerHTML=`<div class="card text-xs font-mono">${l.map(x=>`<div class="py-1" style="border-top:1px solid var(--line);color:${x.level=="ERROR"?"var(--down)":x.level=="WARN"?"var(--warn)":"var(--txt)"}"><span class="muted">${dt(x.ts)}</span> ${x.msg}</div>`).join("")}</div>`}
 
-render();setInterval(()=>{if(["home","signals"].includes(tab))render();else load()},20000);
+render();
+setInterval(()=>{if(tab=="wallet")wallet($("#main")).catch(()=>{})},10000);
+setInterval(()=>{if(tab=="home"||tab=="signals")render();else if(tab!="wallet"&&tab!="market")load()},30000);
 </script>
 </body>
 </html>

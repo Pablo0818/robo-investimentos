@@ -64,6 +64,11 @@ def conn() -> sqlite3.Connection:
                 _conn.execute("UPDATE equity SET flows = equity")
             except sqlite3.OperationalError:
                 pass
+            for tbl in ("trades", "positions"):  # dinheiro fictício (paper) ou real (live)
+                try:
+                    _conn.execute(f"ALTER TABLE {tbl} ADD COLUMN mode TEXT DEFAULT 'paper'")
+                except sqlite3.OperationalError:
+                    pass
             _conn_path = settings.db_path
             for k, v in DEFAULT_RUNTIME.items():
                 _conn.execute("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)", (k, v))
