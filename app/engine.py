@@ -181,15 +181,15 @@ class Engine:
         if champ is None:
             key = f"evolve_try:{sym}"
             last = db.get_setting(key)
-            if last and datetime.now(timezone.utc) - datetime.fromisoformat(last) < timedelta(hours=6):
-                self._st(market, sym, "sem estratégia", "nenhuma estratégia deu lucro no teste; tenta de novo em até 6h")
-                return  # tenta de novo a cada 6h
+            if last and datetime.now(timezone.utc) - datetime.fromisoformat(last) < timedelta(hours=1):
+                self._st(market, sym, "sem estratégia", "nenhuma estratégia deu lucro no teste; tenta de novo em até 1h")
+                return  # tenta de novo a cada 1h (novos candles = nova chance)
             db.set_setting(key, db.now())
             db.log(f"{sym}: sem estratégia aprovada ainda, rodando evolução...")
             evolution.run_for_symbol(sym, df, self.cfg, self.notify, self.timeframe)
             champ = self.champion(sym)
             if champ is None:
-                self._st(market, sym, "sem estratégia", "nenhuma estratégia deu lucro no teste; tenta de novo em 6h")
+                self._st(market, sym, "sem estratégia", "nenhuma estratégia deu lucro no teste; tenta de novo em 1h")
                 return
         pos_arr = st.positions(champ["name"], df, champ["params"])
         want, prev = pos_arr[-1], pos_arr[-2]

@@ -150,6 +150,14 @@ def run_for_symbol(symbol: str, df: pd.DataFrame, cfg, notify=None, timeframe: s
                  champion=champion, names=__import__("app.strategies", fromlist=["allowed"]).allowed(
                      db.get_setting("strategy_style")))
     best = res["best"]
+    if not best and db.get_setting("strategy_style") not in ("", "todas"):
+        db.log(f"Evolução {symbol}: nenhuma estratégia de 'comprar na baixa' passou; testando todos os estilos")
+        res = evolve(df, timeframe=timeframe or cfg.timeframe, fee=cfg.fee_rate, slippage=cfg.slippage,
+                     atr_mult=db.get_float("atr_stop_mult"), take_r=db.get_float("take_profit_r"),
+                     trailing=db.get_bool("trailing_stop"),
+                     max_dd=min(0.35, db.get_float("max_drawdown_pct") / max(0.05, db.get_float("max_position_pct"))),
+                     champion=champion)
+        best = res["best"]
     if not best:
         db.log(f"Evolução {symbol}: nenhuma estratégia passou na prova fora da amostra; mantendo a atual"
                + ("" if champion else " (ativo fica sem operar até achar uma boa)"), "WARN")
