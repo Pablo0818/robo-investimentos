@@ -17,7 +17,7 @@ if ss -ltn | awk '{print $4}' | grep -qE '(^|:)8000$' && ! systemctl is-active -
   exit 1
 fi
 
-read -rp "Seu e-mail de login: " EMAIL
+read -rp "Seu e-mail de login: " EMAIL; EMAIL=$(echo "$EMAIL" | tr -d "[:space:]")
 read -rsp "Senha inicial (a que o Claude te passou): " PASS; echo
 [ -n "$EMAIL" ] && [ -n "$PASS" ] || { echo "E-mail e senha são obrigatórios"; exit 1; }
 
@@ -31,7 +31,7 @@ cp -r "$SRC"/app "$SRC"/main.py "$SRC"/requirements.txt "$DEST"/
 mkdir -p "$DEST/data"
 if [ ! -f "$DEST/.env" ]; then
   cp "$SRC/deploy/env.hostinger" "$DEST/.env"
-  sed -i "s|^ADMIN_EMAIL=.*|ADMIN_EMAIL=$EMAIL|; s|^ADMIN_INITIAL_PASSWORD=.*|ADMIN_INITIAL_PASSWORD=$PASS|; s|^SEC_USER_AGENT=.*|SEC_USER_AGENT=Pablo $EMAIL|; s|^TRUST_PROXY=.*|TRUST_PROXY=true|" "$DEST/.env"
+  sed -i "s|^ADMIN_EMAIL=.*|ADMIN_EMAIL=$EMAIL|; s|^ADMIN_INITIAL_PASSWORD=.*|ADMIN_INITIAL_PASSWORD=$PASS|; s|^SEC_USER_AGENT=.*|SEC_USER_AGENT=\"Pablo $EMAIL\"|; s|^TRUST_PROXY=.*|TRUST_PROXY=true|" "$DEST/.env"
   echo "PORT=8000" >> "$DEST/.env"
 fi
 chmod 600 "$DEST/.env"
@@ -66,7 +66,7 @@ command -v tailscale >/dev/null || curl -fsSL https://tailscale.com/install.sh |
 echo
 echo ">>> Abra o link que vai aparecer abaixo no celular e entre com a sua conta Tailscale <<<"
 tailscale up
-tailscale serve --bg 8000
+tailscale serve -bg 8000
 echo
 echo "PRONTO! Endereço do painel (só funciona nos aparelhos com o app Tailscale ligado):"
 tailscale serve status | grep -o 'https://[^ ]*' | head -1
