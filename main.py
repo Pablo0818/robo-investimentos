@@ -58,6 +58,27 @@ def build():
     except Exception as e:
         db.log(f"B3 desativada: {e}", "WARN")
 
+    try:
+        from app.brokers import build_real_broker
+        real, real_fee = build_real_broker(settings)
+        if real is not None:
+            syms = settings.real_symbols
+            try:  # usa só as moedas que a corretora tem em reais
+                syms = [x for x in syms if x in real.markets] or syms
+            except Exception as e:
+                db.log(f"Corretora real: não consegui listar as moedas ({e})", "WARN")
+            engine.add_strategy_market("real", real, syms)
+            engine.market_fees["real"] = real_fee
+            db.log(f"💰 DINHEIRO REAL ligado na {settings.real_exchange} (taxa {real_fee:.2%} por ordem): "
+                   f"{', '.join(syms)}", "WARN")
+            if not db.get_setting("real_started"):
+                db.set_setting("real_started", db.now())
+                notify_fn = getattr(engine, "notify", None)
+                if notify_fn:
+                    notify_fn(f"💰 Dinheiro real ligado na {settings.real_exchange}.")
+    except Exception as e:
+        db.log(f"Dinheiro real NÃO ligado: {e}", "ERROR")
+
     def status_txt():
         eq, cash = engine.equity()
         st = db.all_settings()

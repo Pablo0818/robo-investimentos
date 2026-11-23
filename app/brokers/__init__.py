@@ -60,3 +60,22 @@ def build_b3_broker(s: Settings) -> Broker | None:
 
 
 __all__ = ["Broker", "Fill", "build_broker", "PaperBroker", "SyntheticFeed"]
+
+
+# taxa de quem executa a ordem a mercado (tomador), conforme as tabelas públicas das corretoras
+REAL_FEES = {"foxbit": 0.005, "mercado": 0.007}
+
+
+def build_real_broker(s: Settings):
+    """Corretora brasileira com dinheiro real (BRL). None se não configurada."""
+    if not s.real_exchange:
+        return None, 0.0
+    if s.real_exchange not in REAL_FEES:
+        raise ValueError(f"REAL_EXCHANGE deve ser foxbit ou mercado (veio '{s.real_exchange}')")
+    if not (s.real_api_key and s.real_secret):
+        raise ValueError("Faltam REAL_API_KEY e REAL_SECRET")
+    from .crypto import CryptoBroker
+
+    b = CryptoBroker(s.real_exchange, s.real_api_key, s.real_secret, testnet=False, quote="BRL")
+    b.name = "real"
+    return b, (s.real_fee or REAL_FEES[s.real_exchange])

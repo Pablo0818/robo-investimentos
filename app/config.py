@@ -41,6 +41,15 @@ class Settings:
     initial_capital: float = field(default_factory=lambda: float(_env("INITIAL_CAPITAL", "10000")))
     quote_currency: str = field(default_factory=lambda: _env("QUOTE_CURRENCY", "USDT"))
     fee_rate: float = field(default_factory=lambda: float(_env("FEE_RATE", "0.001")))
+    # Dinheiro real em corretora brasileira (Foxbit ou Mercado Bitcoin), em reais.
+    # A simulação continua rodando ao lado, para comparar.
+    real_exchange: str = field(default_factory=lambda: _env("REAL_EXCHANGE", "").lower())
+    real_api_key: str = field(default_factory=lambda: _env("REAL_API_KEY"))
+    real_secret: str = field(default_factory=lambda: _env("REAL_SECRET"))
+    real_fee: float = field(default_factory=lambda: float(_env("REAL_FEE", "0") or 0))
+    real_symbols: list = field(default_factory=lambda: [
+        s.strip() for s in _env("REAL_SYMBOLS", "BTC/BRL,ETH/BRL,SOL/BRL,XRP/BRL,ADA/BRL,DOGE/BRL,LINK/BRL,LTC/BRL"
+                                ).split(",") if s.strip()])
     slippage: float = field(default_factory=lambda: float(_env("SLIPPAGE", "0.0005")))
     history_bars: int = field(default_factory=lambda: int(_env("HISTORY_BARS", "1000")))
 

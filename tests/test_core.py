@@ -225,3 +225,14 @@ def test_cerebro_regime_e_comite(fresh_db):
     ok, _, why = brain.decide_entry("X", mk(up), champ, 100, 99.9, 0, "15m", 0.003)
     assert not ok and "taxas" in why
     assert brain.wants_exit(mk(down))
+
+
+def test_trava_do_dinheiro_real(fresh_db):
+    from app import risk
+    assert risk.live_guard("real", 1000).ok
+    assert risk.live_guard("real", 990).ok
+    r = risk.live_guard("real", 960)  # -4% no dia
+    assert not r.ok and "diária" in r.reason
+    fresh_db.set_setting("live_day:real", "")  # outro dia
+    assert not risk.live_guard("real", 840).ok  # -16% desde o topo: trava
+    assert not risk.live_guard("real", 1000).ok  # continua travado até destravar

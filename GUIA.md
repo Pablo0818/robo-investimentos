@@ -295,3 +295,16 @@ As regras de isenção e as alíquotas mudam. **Confirme com um contador.**
 | Nenhum sinal aparece | Normal: as estratégias esperam a configuração certa do mercado. Veja a aba **Registro** |
 | Sinal "falhou" | O motivo aparece no próprio sinal (saldo, quantidade mínima, mercado fechado) |
 | Copycat/Analista com erro da SEC | Preencha `SEC_USER_AGENT` com nome e e-mail reais |
+
+## Dinheiro real na Foxbit ou no Mercado Bitcoin
+
+1. Crie a conta na corretora, termine a verificação de identidade e deposite por PIX.
+2. Crie uma chave de API **só com permissão de negociar (trade)**. Nunca marque saque/retirada.
+   Se a corretora pedir IP, use o do servidor: 2.25.166.148.
+3. No terminal do servidor: `bash /root/robo-investimentos/deploy/ativar-real.sh`
+   (escolha a corretora e cole a chave e o segredo; o segredo não aparece na tela).
+4. No painel, a carteira real aparece como "💰 Real (R$)". A simulação continua ao lado.
+
+Travas próprias do dinheiro real: para de comprar se perder a "perda diária máx." no dia e trava
+tudo se cair a "queda máx. desde o topo". Para destravar: Ajustes > destravar (digite CONFIRMO).
+Para desligar o dinheiro real: apague as linhas REAL_ do arquivo /opt/robo/.env e reinicie (`systemctl restart robo`).

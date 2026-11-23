@@ -120,3 +120,33 @@ def can_open(symbol: str, equity: float, market_open: bool, market: str = "main"
     if db.one("SELECT 1 FROM positions WHERE symbol=?", (symbol,)):
         return Check(False, "já existe posição neste ativo")
     return Check(True)
+
+
+def live_guard(market: str, equity: float, notify=None) -> Check:
+    """Travas próprias do DINHEIRO REAL, medidas só no saldo da corretora real (em reais).
+
+    A simulação tem muito mais dinheiro fictício e esconderia as perdas reais nas travas gerais.
+    """
+    if db.get_bool(f"live_lock:{market}"):
+        return Check(False, "trava do dinheiro real ligada (queda máxima atingida)")
+    if equity <= 0:
+        return Check(False, "sem saldo na corretora real")
+    peak = max(db.get_float(f"live_peak:{market}") if db.get_setting(f"live_peak:{market}") else 0.0, equity)
+    db.set_setting(f"live_peak:{market}", peak)
+    today = datetime.now(timezone.utc).astimezone().date().isoformat()
+    day, _, start = db.get_setting(f"live_day:{market}").partition("|")
+    if day != today or not start:
+        start = str(equity)
+        db.set_setting(f"live_day:{market}", f"{today}|{start}")
+    start_f = float(start)
+    if start_f > 0 and (start_f - equity) / start_f >= db.get_float("max_daily_loss_pct"):
+        return Check(False, "limite de perda diária do dinheiro real atingido")
+    if peak > 0 and (peak - equity) / peak >= db.get_float("max_drawdown_pct"):
+        db.set_setting(f"live_lock:{market}", True)
+        msg = (f"TRAVA DO DINHEIRO REAL: o saldo caiu {(peak - equity) / peak:.1%} desde o topo. "
+               "Nenhuma compra nova com dinheiro real até você destravar no painel.")
+        db.log(msg, "ERROR")
+        if notify:
+            notify(msg)
+        return Check(False, "trava do dinheiro real ligada (queda máxima atingida)")
+    return Check(True)

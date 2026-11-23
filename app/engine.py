@@ -26,6 +26,7 @@ class Engine:
             self.brokers["us"] = us_broker
         # mercados operados pelas estratégias automáticas: mercado -> ativos
         self.strategy_markets: dict[str, list[str]] = {"main": list(cfg.symbols)}
+        self.market_fees: dict[str, float] = {}  # taxa por mercado (corretoras reais cobram mais)
         self.notify = notify or (lambda m: None)
         self.on_signal = on_signal or (lambda s: None)
         self.lock = threading.RLock()
@@ -99,6 +100,9 @@ class Engine:
         if b is None or b.name == "paper" or getattr(b, "paper", False):
             return "paper"
         return "live"
+
+    def fee_for(self, market: str) -> float:
+        return self.market_fees.get(market, self.cfg.fee_rate)
 
     def market_equity(self, market: str) -> tuple[float, float]:
         """Patrimônio e caixa de UM mercado (cada mercado tem sua moeda e seu caixa)."""
@@ -199,7 +203,7 @@ class Engine:
             self._evolved_this_cycle += 1
             db.set_setting(key, db.now())
             db.log(f"{sym}: sem estratégia aprovada ainda, rodando evolução...")
-            evolution.run_for_symbol(sym, df, self.cfg, self.notify, self.timeframe)
+            evolution.run_for_symbol(sym, df, self.cfg, self.notify, self.timeframe, self.fee_for(market))
             champ = self.champion(sym)
             if champ is None:
                 self._st(market, sym, "sem estratégia", "nenhuma estratégia passou no teste ainda; testa de novo em instantes")
@@ -239,6 +243,8 @@ class Engine:
         if want == 1 and prev == 0:
             eq, cash = self.market_equity(market)
             chk = risk.can_open(sym, eq, b.is_market_open(sym), market)
+            if chk.ok and self.money_mode(market) == "live":
+                chk = risk.live_guard(market, eq, self.notify)
             if not chk.ok:
                 db.log(f"{sym}: sinal de compra ignorado ({chk.reason})")
                 self._st(market, sym, "bloqueado", chk.reason, champ["name"])
@@ -252,7 +258,7 @@ class Engine:
             stop = live_px - db.get_float("atr_stop_mult") * a
             take = 0.0 if champ["name"] in st.RUNNERS else live_px + db.get_float("take_profit_r") * (live_px - stop)
             ok, mult, why = brain.decide_entry(sym, df, champ, live_px, stop, take, self.timeframe,
-                                               2 * (self.cfg.fee_rate + self.cfg.slippage))
+                                               2 * (self.fee_for(market) + self.cfg.slippage))
             if not ok:
                 db.log(f"🧠 {sym}: compra vetada — {why}")
                 self._st(market, sym, "bloqueado", why, champ["name"])
@@ -330,6 +336,8 @@ class Engine:
                 eq, cash = self.market_equity(market)
                 if market in self.strategy_markets:
                     chk = risk.can_open(sym, eq, b.is_market_open(sym), market)
+                    if chk.ok and self.money_mode(market) == "live":
+                        chk = risk.live_guard(market, eq, self.notify)
                     if not chk.ok:
                         raise RuntimeError(chk.reason)
                     dist = sig["price"] - sig["stop"]
@@ -426,7 +434,8 @@ class Engine:
             for sym in self.symbols_for(market):
                 try:
                     df = self.broker(market).fetch_ohlcv(sym, self.timeframe, self.cfg.history_bars)
-                    r = evolution.run_for_symbol(sym, df, self.cfg, self.notify, self.timeframe)
+                    r = evolution.run_for_symbol(sym, df, self.cfg, self.notify, self.timeframe,
+                                                 self.fee_for(market))
                     out.append({"symbol": sym, "promoted": r.get("promote"), "best": r.get("best")})
                 except Exception as e:
                     db.log(f"Evolução {sym} falhou: {e}", "ERROR")
