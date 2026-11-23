@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 from . import db, evolution, risk
+from . import brain
 from . import strategies as st
 from .brokers import Broker
 from .config import Settings
@@ -221,11 +222,16 @@ class Engine:
                 self._exit_now(sym, "stop de proteção atingido")
             elif position["take"] and live_px >= position["take"]:
                 self._exit_now(sym, "alvo de lucro atingido")
+            elif brain.wants_exit(df):
+                self._exit_now(sym, brain.wants_exit(df))
             elif want == 0:
                 self.create_signal(sym, "sell", position["qty"], live_px, 0, 0, champ["name"],
                                    f"estratégia {champ['name']} mandou sair", market=market)
             return
 
+        if brain.reflect(sym, champ):
+            self._st(market, sym, "sem estratégia", "estratégia aposentada depois de 5 perdas seguidas; reaprendendo")
+            return
         if not (want == 1 and prev == 0):
             self._st(market, sym, "aguardando", "esperando o preço cair até o ponto de compra da estratégia"
                      if champ["name"] in st.STYLES["baixa"] else "esperando o sinal de entrada", champ["name"])
@@ -245,12 +251,19 @@ class Engine:
                 return
             stop = live_px - db.get_float("atr_stop_mult") * a
             take = 0.0 if champ["name"] in st.RUNNERS else live_px + db.get_float("take_profit_r") * (live_px - stop)
-            qty = b.normalize_qty(sym, risk.position_size(eq, cash, live_px, stop, sym), live_px)
+            ok, mult, why = brain.decide_entry(sym, df, champ, live_px, stop, take, self.timeframe,
+                                               2 * (self.cfg.fee_rate + self.cfg.slippage))
+            if not ok:
+                db.log(f"🧠 {sym}: compra vetada — {why}")
+                self._st(market, sym, "bloqueado", why, champ["name"])
+                return
+            qty = b.normalize_qty(sym, risk.position_size(eq, cash, live_px, stop, sym, mult), live_px)
             if qty <= 0:
                 db.log(f"{sym}: sinal de compra, mas o tamanho calculado é menor que o mínimo do ativo", "WARN")
                 return
             self.create_signal(sym, "buy", qty, live_px, stop, take, champ["name"],
-                               st.describe(champ["name"], champ["params"]), market=market)
+                               st.describe(champ["name"], champ["params"]) + (f" · 🧠 {why}" if why else ""),
+                               market=market)
             self._st(market, sym, "comprando", "sinal de compra gerado agora", champ["name"])
 
     def _update_indices(self) -> None:

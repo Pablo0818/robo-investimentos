@@ -204,3 +204,24 @@ def test_estrategias_dos_traders():
         assert len(pos) == n and set(np.unique(pos)) <= {0.0, 1.0}
     assert set(st.allowed("hibrido")) >= {"dip_buyer", "breakout_volume", "momentum_trend", "setup_91"}
     assert st.STRATEGIES["dip_buyer"].space["trend_filter"][0] >= 100  # compra na baixa só em tendência de alta
+
+
+def test_cerebro_regime_e_comite(fresh_db):
+    import numpy as np
+    import pandas as pd
+    from app import brain
+    n = 400
+    up = 100 * np.exp(np.linspace(0, 0.5, n))
+    down = up[::-1]
+    mk = lambda c: pd.DataFrame({"open": c, "high": c * 1.01, "low": c * 0.99, "close": c, "volume": 1.0})
+    assert brain.regime(mk(up)) == "alta"
+    assert brain.regime(mk(down)) == "queda"
+    champ = {"name": "momentum_trend", "params": {"ma": 20, "roc": 5}, "oos_sharpe": 1.0}
+    ok, mult, why = brain.decide_entry("X", mk(down), champ, 100, 98, 0, "15m", 0.003)
+    assert not ok and "queda" in why
+    ok, mult, why = brain.decide_entry("X", mk(up), champ, 100, 97, 0, "15m", 0.003)
+    assert ok and 0.5 <= mult <= 1.5
+    # lucro esperado pequeno demais para as taxas
+    ok, _, why = brain.decide_entry("X", mk(up), champ, 100, 99.9, 0, "15m", 0.003)
+    assert not ok and "taxas" in why
+    assert brain.wants_exit(mk(down))

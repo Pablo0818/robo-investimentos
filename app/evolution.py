@@ -114,11 +114,14 @@ def evolve(df: pd.DataFrame, *, timeframe: str = "1h", fee: float = 0.001, slipp
         return r, score(r, max_dd, 3)
 
     best = None
+    valid = []
     for ind in finalists:
         r, s = oos(ind)
         ok = r.trades >= 2 and r.max_drawdown <= max_dd and r.sharpe > 0
         cand = {"name": ind["name"], "params": ind["params"], "train_score": ind["fit"], "oos": r.dict(),
                 "oos_score": s, "valid": ok}
+        if ok:
+            valid.append({"name": ind["name"], "params": ind["params"], "sharpe": r.sharpe})
         if ok and (best is None or s > best["oos_score"]):
             best = cand
 
@@ -135,7 +138,9 @@ def evolve(df: pd.DataFrame, *, timeframe: str = "1h", fee: float = 0.001, slipp
         else:
             promote = best["oos_score"] > champ_eval["oos_score"] * 1.1 + 0.05 and not (
                 best["name"] == champion["name"] and best["params"] == champion["params"])
-    return {"best": best, "champion_eval": champ_eval, "promote": promote, "buy_hold_oos": hold, "split": split}
+    valid.sort(key=lambda m: m["sharpe"], reverse=True)
+    return {"best": best, "champion_eval": champ_eval, "promote": promote, "buy_hold_oos": hold, "split": split,
+            "committee": valid[:3]}
 
 
 def run_for_symbol(symbol: str, df: pd.DataFrame, cfg, notify=None, timeframe: str | None = None) -> dict:
@@ -158,6 +163,9 @@ def run_for_symbol(symbol: str, df: pd.DataFrame, cfg, notify=None, timeframe: s
                      max_dd=min(0.35, db.get_float("max_drawdown_pct") / max(0.05, db.get_float("max_position_pct"))),
                      champion=champion)
         best = res["best"]
+    if best and res.get("committee"):
+        from . import brain
+        brain.save_committee(symbol, res["committee"])  # as 3 melhores votam nas próximas compras
     if not best:
         db.log(f"Evolução {symbol}: nenhuma estratégia passou na prova fora da amostra; mantendo a atual"
                + ("" if champion else " (ativo fica sem operar até achar uma boa)"), "WARN")

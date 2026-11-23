@@ -74,12 +74,13 @@ def performance_weight(symbol: str | None) -> float:
     return max(0.5, min(1.5, w))
 
 
-def position_size(equity: float, cash: float, price: float, stop: float, symbol: str | None = None) -> float:
+def position_size(equity: float, cash: float, price: float, stop: float, symbol: str | None = None,
+                  mult: float = 1.0) -> float:
     """Quantidade a comprar (ajustada pelo desempenho do ativo)."""
     if price <= 0 or stop >= price:
         return 0.0
     cap = sizing_capital(equity)
-    w = performance_weight(symbol)
+    w = performance_weight(symbol) * mult
     risk_amt = cap * db.get_float("risk_per_trade") * w
     qty_risk = risk_amt / (price - stop)
     qty_cap = cap * min(0.35, db.get_float("max_position_pct") * w) / price
