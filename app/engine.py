@@ -101,6 +101,11 @@ class Engine:
             return "paper"
         return "live"
 
+    def sim_paused(self, market: str) -> bool:
+        """Com dinheiro real ligado, os mercados fictícios só coletam dados (não compram nem evoluem)."""
+        return (self.money_mode(market) == "paper" and bool(self.live_markets())
+                and not db.get_bool("simulate_with_live"))
+
     def live_markets(self) -> list[str]:
         return [m for m in self.brokers if self.money_mode(m) == "live"]
 
@@ -201,12 +206,19 @@ class Engine:
             return
         self.prices[sym] = float(df["close"].iloc[-1])
         self.candles[(market, sym)] = df.tail(400).reset_index(drop=True)
+        sim_off = self.sim_paused(market)
+        if sim_off and not db.one("SELECT 1 FROM positions WHERE symbol=?", (sym,)):
+            self._st(market, sym, "coletando dados", "simulação parada: só lendo preços (dinheiro real ligado)")
+            return
         champ = self.champion(sym)
+        if champ is None and sim_off:
+            return
         if champ is None:
             key = f"evolve_try:{sym}"
             last = db.get_setting(key)
             # revezamento justo: cada ativo sem estratégia volta à fila depois que os outros foram testados
-            sem = sum(1 for m in self.strategy_markets for x in self.symbols_for(m) if self.champion(x) is None)
+            sem = sum(1 for m in self.strategy_markets if not self.sim_paused(m)
+                      for x in self.symbols_for(m) if self.champion(x) is None)
             per = max(1, int(db.get_float("evolve_max_per_cycle")))
             wait = timedelta(minutes=max(db.get_float("evolve_retry_minutes"), sem / per) - 0.1)
             if (last and datetime.now(timezone.utc) - datetime.fromisoformat(last) < wait) or \
@@ -301,6 +313,8 @@ class Engine:
     def create_signal(self, sym: str, side: str, qty: float, price: float, stop: float, take: float,
                       strategy: str, reason: str, market: str = "main", notional: float = 0.0,
                       force_manual: bool = False) -> dict | None:
+        if side == "buy" and self.sim_paused(market):
+            return None  # com dinheiro real ligado, a simulação não compra mais
         dup = db.one("SELECT id FROM signals WHERE symbol=? AND side=? AND status='pending'", (sym, side))
         if dup:
             return None
@@ -444,6 +458,8 @@ class Engine:
         out = []
         db.set_setting("last_evolve", db.now())
         for market in self.strategy_markets:
+            if self.sim_paused(market):
+                continue
             for sym in self.symbols_for(market):
                 try:
                     df = self.broker(market).fetch_ohlcv(sym, self.timeframe, self.cfg.history_bars)

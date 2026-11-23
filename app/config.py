@@ -119,7 +119,7 @@ DEFAULT_RUNTIME = {
     "evolve_max_per_cycle": "50",  # quantos ativos testar por ciclo (sem limite prático)
     "strategy_style": "hibrido",   # hibrido = baixa em tendência de alta + rompimentos | baixa | tendencia | todas
     "timeframe": "",
-    "crypto_symbols": "", "b3_symbols": "", "brain_enabled": "true",
+    "crypto_symbols": "", "b3_symbols": "", "brain_enabled": "true", "simulate_with_live": "false",
     # Pesquisa EUA (trader-skill)
     "us_cash_buffer_pct": "10",
     "us_max_position_pct": "25",

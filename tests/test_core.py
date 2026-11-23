@@ -236,3 +236,16 @@ def test_trava_do_dinheiro_real(fresh_db):
     fresh_db.set_setting("live_day:real", "")  # outro dia
     assert not risk.live_guard("real", 840).ok  # -16% desde o topo: trava
     assert not risk.live_guard("real", 1000).ok  # continua travado até destravar
+
+
+def test_simulacao_para_com_dinheiro_real(fresh_db):
+    e = _engine()
+
+    class Live:
+        name = "real"
+        paper = False
+    e.brokers["real"] = Live()
+    assert e.sim_paused("main") and not e.sim_paused("real")
+    assert e.create_signal("BTC/USDT", "buy", 1, 100, 95, 110, "x", "y", market="main") is None
+    fresh_db.set_setting("simulate_with_live", True)
+    assert not e.sim_paused("main")
