@@ -78,4 +78,5 @@ def build_real_broker(s: Settings):
 
     b = CryptoBroker(s.real_exchange, s.real_api_key, s.real_secret, testnet=False, quote="BRL")
     b.name = "real"
-    return b, (s.real_fee or REAL_FEES[s.real_exchange])
+    b.fee_rate = s.real_fee or REAL_FEES[s.real_exchange]
+    return b, b.fee_rate

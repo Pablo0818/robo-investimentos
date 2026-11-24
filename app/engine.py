@@ -269,11 +269,28 @@ class Engine:
         if brain.reflect(sym, champ):
             self._st(market, sym, "sem estratégia", "estratégia aposentada depois de 5 perdas seguidas; reaprendendo")
             return
-        if not (want == 1 and prev == 0):
+        # Entrada: no candle em que o sinal nasce OU até N candles depois (se o preço não fugiu e
+        # o robô ainda não operou esse sinal). Antes só entrava no candle exato e perdia a maioria.
+        fresh = want == 1 and prev == 0
+        if want == 1 and not fresh:
+            run = 0
+            for v in pos_arr[::-1]:
+                if v != 1:
+                    break
+                run += 1
+            late_max = int(db.get_float("late_entry_bars") or 0)
+            start = len(df) - run
+            if 0 < run <= late_max + 1 and start >= 1:
+                start_px = float(df["close"].iloc[start])
+                atr_v = float(st.atr(df).iloc[-1])
+                start_ts = df["ts"].iloc[start].isoformat()
+                traded = db.one("SELECT 1 FROM trades WHERE symbol=? AND ts>=?", (sym, start_ts))
+                fresh = live_px <= start_px + 0.5 * atr_v and not traded
+        if not fresh:
             self._st(market, sym, "aguardando", "esperando o preço cair até o ponto de compra da estratégia"
                      if champ["name"] in st.STYLES["baixa"] else "esperando o sinal de entrada", champ["name"])
             return
-        if want == 1 and prev == 0:
+        if fresh:
             eq, cash = self.market_equity(market)
             chk = risk.can_open(sym, eq, b.is_market_open(sym), market)
             if chk.ok and self.money_mode(market) == "live":

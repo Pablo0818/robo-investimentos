@@ -53,10 +53,16 @@ class CryptoBroker(Broker):
         return True
 
     def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
+        import time
+
         n = min(limit + 1, 720)
+        tf_ms = self.ex.parse_timeframe(timeframe) * 1000
         while True:
             try:
-                raw = self.ex.fetch_ohlcv(symbol, timeframe=timeframe, limit=n)
+                # pede a partir de "agora - n candles": algumas corretoras (ex.: Foxbit) sem isso
+                # devolvem os candles mais antigos, não os de hoje
+                since = int(time.time() * 1000) - n * tf_ms
+                raw = self.ex.fetch_ohlcv(symbol, timeframe=timeframe, since=since, limit=n)
                 break
             except Exception as e:
                 if self._switch_source(e):
@@ -65,7 +71,8 @@ class CryptoBroker(Broker):
                     n = 500 if n > 500 else 300
                     continue
                 raise
-        df = pd.DataFrame(raw, columns=["ts", "open", "high", "low", "close", "volume"])
+        df = pd.DataFrame([r[:6] for r in raw], columns=["ts", "open", "high", "low", "close", "volume"])
+        df = df.astype(float).sort_values("ts").drop_duplicates("ts")  # algumas devolvem do mais novo ao mais velho
         df["ts"] = pd.to_datetime(df["ts"], unit="ms", utc=True)
         return df.iloc[:-1].reset_index(drop=True)  # remove o candle ainda em formação
 
@@ -95,7 +102,18 @@ class CryptoBroker(Broker):
             return 0.0
         return q
 
+    fee_rate = 0.0  # taxa estimada quando a corretora não informa a taxa na resposta da ordem
+
     def market_order(self, symbol: str, side: str, qty: float) -> Fill:
+        if side == "sell" and not self.paper:
+            # a taxa da compra pode ter sido cobrada na própria moeda: vende o que existe de verdade
+            try:
+                base = symbol.split("/")[0]
+                free = float(self.ex.fetch_balance().get("free", {}).get(base, 0) or 0)
+                if 0 < free < qty:
+                    qty = float(self.ex.amount_to_precision(symbol, free))
+            except Exception:
+                pass
         o = self.ex.create_order(symbol, "market", side, qty)
         filled = float(o.get("filled") or qty)
         price = float(o.get("average") or o.get("price") or self.last_price(symbol))
@@ -105,4 +123,6 @@ class CryptoBroker(Broker):
                 cost = float(f["cost"])
                 cur = f.get("currency")
                 fee += cost if cur == self.quote else cost * price
+        if not fee and self.fee_rate:
+            fee = filled * price * self.fee_rate
         return Fill(symbol, side, filled, price, fee, order_id=str(o.get("id", "")))
