@@ -254,7 +254,7 @@ class Engine:
                 stop = max(stop, live_px - db.get_float("atr_stop_mult") * a)
             db.execute("UPDATE positions SET highest=?, stop=? WHERE symbol=?", (hi, stop, sym))
             self._st(market, sym, "comprado", f"resultado {live_px / position['avg_price'] - 1:+.2%} · stop "
-                     f"{stop:.6g} · alvo {position['take'] or 0:.6g}", champ["name"])
+                     f"{stop:.6g} · " + (f"alvo {position['take']:.6g}" if position['take'] else "deixando o lucro correr (stop móvel)"), champ["name"])
             if stop and live_px <= stop:
                 self._exit_now(sym, "stop de proteção atingido")
             elif position["take"] and live_px >= position["take"]:

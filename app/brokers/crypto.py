@@ -74,6 +74,8 @@ class CryptoBroker(Broker):
         df = pd.DataFrame([r[:6] for r in raw], columns=["ts", "open", "high", "low", "close", "volume"])
         df = df.astype(float).sort_values("ts").drop_duplicates("ts")  # algumas devolvem do mais novo ao mais velho
         df["ts"] = pd.to_datetime(df["ts"], unit="ms", utc=True)
+        if self.keep_forming:  # dinheiro real: usa o candle em formação (preço de agora) para decidir a cada minuto
+            return df.reset_index(drop=True)
         return df.iloc[:-1].reset_index(drop=True)  # remove o candle ainda em formação
 
     def last_price(self, symbol: str) -> float:
@@ -102,6 +104,7 @@ class CryptoBroker(Broker):
             return 0.0
         return q
 
+    keep_forming = False
     fee_rate = 0.0  # taxa estimada quando a corretora não informa a taxa na resposta da ordem
 
     def market_order(self, symbol: str, side: str, qty: float) -> Fill:

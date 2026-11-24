@@ -79,4 +79,5 @@ def build_real_broker(s: Settings):
     b = CryptoBroker(s.real_exchange, s.real_api_key, s.real_secret, testnet=False, quote="BRL")
     b.name = "real"
     b.fee_rate = s.real_fee or REAL_FEES[s.real_exchange]
+    b.keep_forming = True  # confere o preço a cada minuto, sem esperar o candle de 1h fechar
     return b, b.fee_rate
