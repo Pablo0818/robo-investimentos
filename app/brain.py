@@ -77,8 +77,8 @@ def vote(symbol: str, df: pd.DataFrame, champ: dict) -> tuple[float, int]:
 
 # ---------------- 3/4. custos e pausa ----------------
 def pays_fees(price: float, stop: float, take: float, cost_roundtrip: float) -> bool:
-    gain = ((take - price) if take else 2 * (price - stop)) / price
-    return gain > 3 * cost_roundtrip
+    gain = ((take - price) if take else 3 * (price - stop)) / price  # tendência: mira 3x o risco
+    return gain > 2 * cost_roundtrip
 
 
 def in_cooldown(symbol: str, timeframe: str, bars: int = 3) -> bool:

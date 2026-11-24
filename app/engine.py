@@ -101,6 +101,13 @@ class Engine:
             return "paper"
         return "live"
 
+    def tf_for(self, market: str) -> str:
+        """Gráfico de cada mercado. O dinheiro real usa 1h: na Foxbit a taxa (~1% ida e volta)
+        come os movimentos pequenos do gráfico de 15 min."""
+        if market == "real":
+            return db.get_setting("real_timeframe") or "1h"
+        return self.timeframe
+
     def sim_paused(self, market: str) -> bool:
         """Com dinheiro real ligado, os mercados fictícios só coletam dados (não compram nem evoluem)."""
         return (self.money_mode(market) == "paper" and bool(self.live_markets())
@@ -200,7 +207,8 @@ class Engine:
 
     def process_symbol(self, sym: str, market: str = "main") -> None:
         b = self.broker(market)
-        df = b.fetch_ohlcv(sym, self.timeframe, self.cfg.history_bars)
+        tf = self.tf_for(market)
+        df = b.fetch_ohlcv(sym, tf, self.cfg.history_bars)
         if len(df) < 100:
             db.log(f"{sym}: histórico insuficiente ({len(df)} candles)", "WARN")
             return
@@ -228,7 +236,7 @@ class Engine:
             self._evolved_this_cycle += 1
             db.set_setting(key, db.now())
             db.log(f"{sym}: sem estratégia aprovada ainda, rodando evolução...")
-            evolution.run_for_symbol(sym, df, self.cfg, self.notify, self.timeframe, self.fee_for(market))
+            evolution.run_for_symbol(sym, df, self.cfg, self.notify, tf, self.fee_for(market))
             champ = self.champion(sym)
             if champ is None:
                 self._st(market, sym, "sem estratégia", "nenhuma estratégia passou no teste ainda; testa de novo em instantes")
@@ -282,8 +290,10 @@ class Engine:
                 return
             stop = live_px - db.get_float("atr_stop_mult") * a
             take = 0.0 if champ["name"] in st.RUNNERS else live_px + db.get_float("take_profit_r") * (live_px - stop)
-            ok, mult, why = brain.decide_entry(sym, df, champ, live_px, stop, take, self.timeframe,
-                                               2 * (self.fee_for(market) + self.cfg.slippage))
+            cost = 2 * (self.fee_for(market) + self.cfg.slippage)
+            if take and self.money_mode(market) == "live" and (take - live_px) / live_px < 2.2 * cost:
+                take = live_px * (1 + 2.2 * cost)  # corretora cara: o alvo precisa pagar as taxas com folga
+            ok, mult, why = brain.decide_entry(sym, df, champ, live_px, stop, take, tf, cost)
             if not ok:
                 db.log(f"🧠 {sym}: compra vetada — {why}")
                 self._st(market, sym, "bloqueado", why, champ["name"])
@@ -462,8 +472,8 @@ class Engine:
                 continue
             for sym in self.symbols_for(market):
                 try:
-                    df = self.broker(market).fetch_ohlcv(sym, self.timeframe, self.cfg.history_bars)
-                    r = evolution.run_for_symbol(sym, df, self.cfg, self.notify, self.timeframe,
+                    df = self.broker(market).fetch_ohlcv(sym, self.tf_for(market), self.cfg.history_bars)
+                    r = evolution.run_for_symbol(sym, df, self.cfg, self.notify, self.tf_for(market),
                                                  self.fee_for(market))
                     out.append({"symbol": sym, "promoted": r.get("promote"), "best": r.get("best")})
                 except Exception as e:

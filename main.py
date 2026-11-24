@@ -69,6 +69,11 @@ def build():
                 db.log(f"Corretora real: não consegui listar as moedas ({e})", "WARN")
             engine.add_strategy_market("real", real, syms)
             engine.market_fees["real"] = real_fee
+            if db.get_setting("real_tf_v") != "1":  # v1: dinheiro real passa para o gráfico de 1h
+                for x in syms:
+                    db.execute("UPDATE strategies SET status='retired' WHERE symbol=? AND status='champion'", (x,))
+                    db.execute("DELETE FROM settings WHERE key IN (?,?)", (f"evolve_try:{x}", f"committee:{x}"))
+                db.set_setting("real_tf_v", "1")
             db.log(f"💰 DINHEIRO REAL ligado na {settings.real_exchange} (taxa {real_fee:.2%} por ordem): "
                    f"{', '.join(syms)}", "WARN")
             if not db.get_setting("real_started"):
