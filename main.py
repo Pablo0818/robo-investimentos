@@ -67,6 +67,16 @@ def build():
                 syms = [x for x in syms if x in real.markets] or syms
             except Exception as e:
                 db.log(f"Corretora real: não consegui listar as moedas ({e})", "WARN")
+            if not os.getenv("REAL_SYMBOLS"):  # mais moedas = mais oportunidades: as 20 mais negociadas em reais
+                try:
+                    tk = real.ex.fetch_tickers()
+                    liq = sorted((t for k, t in tk.items() if k.endswith("/BRL") and not k.startswith(("USDT/", "USDC/"))),
+                                 key=lambda t: t.get("quoteVolume") or 0, reverse=True)
+                    top = [t["symbol"] for t in liq[:20] if (t.get("quoteVolume") or 0) > 0]
+                    if len(top) >= 5:
+                        syms = top
+                except Exception as e:
+                    db.log(f"Corretora real: não consegui ver as mais negociadas ({e}); usando a lista padrão", "WARN")
             engine.add_strategy_market("real", real, syms)
             engine.market_fees["real"] = real_fee
             if db.get_setting("real_tf_v") != "1":  # v1: dinheiro real passa para o gráfico de 1h

@@ -91,7 +91,7 @@ def in_cooldown(symbol: str, timeframe: str, bars: int = 3) -> bool:
         return False
     if last.tzinfo is None:
         last = last.replace(tzinfo=timezone.utc)
-    return datetime.now(timezone.utc) - last < timedelta(minutes=TF_MIN.get(timeframe, 60) * bars)
+    return datetime.now(timezone.utc) - last < timedelta(minutes=min(60, TF_MIN.get(timeframe, 60) * bars))
 
 
 # ---------------- 5. reflexão ----------------
