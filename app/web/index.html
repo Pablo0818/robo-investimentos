@@ -100,10 +100,22 @@ async function render(){killCharts();await load();const m=$("#main");m.innerHTML
 
 function kpi(l,v,c="",sub=""){return `<div class="card"><div class="text-xs muted">${l}</div><div class="kpi-v num ${c}">${v}</div>${sub?`<div class="text-xs muted mt-0.5 truncate">${sub}</div>`:""}</div>`}
 
+/* --------------------------- SAÚDE DO SISTEMA --------------------------- */
+function healthCard(){const t=S.selftest; if(S.sim_equity==null)return "";
+  const icon=o=>o===true?"✅":o===false?"❌":"⚠️";
+  const rows=t?t.items.map(i=>`<div class="flex gap-2 py-1 text-sm" style="border-bottom:1px solid var(--line)"><span>${icon(i.ok)}</span><div><b>${i.item}</b><div class="text-xs muted">${i.detail}</div></div></div>`).join(""):`<div class="text-sm muted">Ainda não rodou. Toque em "Rodar autoteste".</div>`;
+  const head=t?(t.ok?`<span style="color:var(--up)">✅ Tudo funcionando</span>`:`<span style="color:var(--down)">❌ ${t.fails} problema(s)</span>`):"⚠️ Sem autoteste";
+  return `<div class="card mb-3" style="border-color:${t&&!t.ok?"var(--down)":"var(--line)"}"><div class="flex justify-between items-center"><div class="font-semibold">🩺 Saúde do sistema · ${head}</div><span class="text-xs muted">${t?new Date(t.ts.endsWith("Z")||t.ts.includes("+")?t.ts:t.ts+"Z").toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}):""}</span></div>
+  <details ${t&&!t.ok?"open":""} class="mt-2"><summary class="text-xs muted">ver cada item (conferido no servidor, contra a corretora)</summary>${rows}</details>
+  <div class="flex gap-2 mt-2"><button class="btn" onclick="runSelftest(this)">Rodar autoteste</button><button class="btn" onclick="orderTest(this)">🧪 Testar ordem real (~R$ 10)</button></div></div>`}
+async function runSelftest(b){b.disabled=true;b.textContent="Testando…";try{S.selftest=await api("/api/selftest");toast(S.selftest.ok?"✅ Autoteste: tudo funcionando":"❌ Autoteste encontrou "+S.selftest.fails+" problema(s)");render()}catch(e){toast("Erro: "+e.message)}finally{b.disabled=false}}
+async function orderTest(b){const c=prompt("Isso COMPRA e VENDE na hora o valor mínimo da corretora com seu dinheiro real, para provar que as ordens funcionam. Custa só as taxas (centavos). Digite CONFIRMO:");if(!c)return;
+  b.disabled=true;b.textContent="Comprando e vendendo…";try{const r=await api("/api/selftest/order",{method:"POST",body:JSON.stringify({confirm:c})});alert((r.ok?"✅ ORDENS FUNCIONANDO\n\n":"❌ FALHOU\n\n")+r.detail.split(" · ").join("\n"))}catch(e){alert("Erro: "+e.message)}finally{b.disabled=false;b.textContent="🧪 Testar ordem real (~R$ 10)"}}
+
 /* ------------------------------- PAINEL ------------------------------- */
 async function home(m){
   const ret=S.deposits?S.profit/S.deposits:0;
-  m.innerHTML=`
+  m.innerHTML=`${healthCard()}
   <div class="card glow" style="background:linear-gradient(135deg,#0f1b33,#0b1324)">
     <div class="flex justify-between items-start"><div><div class="text-xs muted">${S.sim_equity!=null?"💰 Dinheiro real (R$)":"Patrimônio total"}</div>
       <div class="text-3xl font-bold num mt-1">${fmt(S.equity)}</div>

@@ -198,6 +198,10 @@ def create_app(engine: Engine) -> FastAPI:
                 "realized_pnl": lr["s"], "fees": lr["f"], "positions": lpos,
                 "by_market": [x for x in out["by_market"] if x["market"] in live],
             })
+            try:
+                out["selftest"] = json.loads(db.get_setting("selftest_last") or "null")
+            except Exception:
+                out["selftest"] = None
             sts = [v for k, v in engine.state.items() if k[0] in live]
             if sts:  # resumo do que o robô está fazendo com o dinheiro real, em uma linha
                 import collections
@@ -276,6 +280,24 @@ def create_app(engine: Engine) -> FastAPI:
     def evolve():
         with engine.lock:
             return {"results": engine.evolve_all()}
+
+    @app.get("/api/selftest", dependencies=protected)
+    def selftest_run():
+        from . import selftest
+        res = selftest.run(engine)
+        db.set_setting("selftest_last", json.dumps(res))
+        return res
+
+    class OrderTestIn(BaseModel):
+        confirm: str = ""
+
+    @app.post("/api/selftest/order", dependencies=protected)
+    def selftest_order(body: OrderTestIn):
+        if body.confirm.strip().upper() != "CONFIRMO":
+            raise HTTPException(400, "Digite CONFIRMO para gastar as taxas de uma compra e venda real mínima")
+        from . import selftest
+        with engine.lock:
+            return selftest.order_test(engine)
 
     @app.post("/api/settings", dependencies=protected)
     def save_settings(body: SettingsIn):

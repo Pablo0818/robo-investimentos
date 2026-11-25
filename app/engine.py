@@ -209,6 +209,7 @@ class Engine:
                         db.log(f"Módulo extra falhou: {e}", "ERROR")
                 self.last_cycle = db.now()
                 self.last_error = None
+                self._periodic_selftest()
             except Exception as e:
                 self.last_error = str(e)
                 db.log(f"Erro no ciclo: {e}\n{traceback.format_exc()}", "ERROR")
@@ -431,6 +432,31 @@ class Engine:
         self.create_signal(sym, "buy", qty, px, stop, take, "oportunidade", why, market=market)
         self._st(market, sym, "comprando", why, "oportunidade")
         return True
+
+    def _periodic_selftest(self) -> None:
+        """Autoteste a cada 15 min; avisa no Telegram/registro quando algo quebra ou volta a funcionar."""
+        if not self.live_markets():
+            return
+        last = db.get_setting("selftest_ts")
+        if last and datetime.now(timezone.utc) - datetime.fromisoformat(last) < timedelta(minutes=15):
+            return
+        db.set_setting("selftest_ts", datetime.now(timezone.utc).isoformat())
+        from . import selftest
+        try:
+            res = selftest.run(self)
+        except Exception as e:
+            res = {"ok": False, "fails": 1, "items": [{"item": "Autoteste", "ok": False, "detail": str(e)[:200]}]}
+        res["ts"] = db.now()
+        prev = json.loads(db.get_setting("selftest_last") or "{}")
+        db.set_setting("selftest_last", json.dumps(res))
+        if not res["ok"]:
+            bad = "; ".join(f"{i['item']}: {i['detail'][:80]}" for i in res["items"] if i["ok"] is False)
+            db.log(f"🩺 Autoteste encontrou problema: {bad}", "ERROR")
+            if prev.get("ok", True):
+                self.notify(f"🩺 Robô com problema: {bad}")
+        elif prev and not prev.get("ok", True):
+            db.log("🩺 Autoteste: tudo funcionando de novo")
+            self.notify("🩺 Robô funcionando de novo: autoteste sem falhas.")
 
     def _calibrate_opportunity(self) -> None:
         live = self.live_markets()
