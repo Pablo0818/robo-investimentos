@@ -12,6 +12,7 @@ from typing import Callable
 
 from . import db, evolution, risk
 from . import brain
+from . import opportunity
 from . import strategies as st
 from .brokers import Broker
 from .config import Settings
@@ -27,7 +28,8 @@ class Engine:
         # mercados operados pelas estratégias automáticas: mercado -> ativos
         self.strategy_markets: dict[str, list[str]] = {"main": list(cfg.symbols)}
         self.market_fees: dict[str, float] = {}
-        self._last_err: dict[str, str] = {}  # taxa por mercado (corretoras reais cobram mais)
+        self._last_err: dict[str, str] = {}
+        self.opp_frames: dict = {}  # taxa por mercado (corretoras reais cobram mais)
         self.notify = notify or (lambda m: None)
         self.on_signal = on_signal or (lambda s: None)
         self.lock = threading.RLock()
@@ -194,6 +196,10 @@ class Engine:
                         if leq > 0:  # saldo 0 é falha de leitura da corretora, não perda: não desenha no gráfico
                             db.execute("INSERT INTO equity_live(ts,equity,cash) VALUES(?,?,?)", (db.now(), leq, lcash))
                 risk.update_guards(eq, self.notify)
+                try:
+                    self._calibrate_opportunity()
+                except Exception as e:
+                    db.log(f"Agente de oportunidade: falha ao calibrar ({e})", "ERROR")
                 self._maybe_evolve()
                 self._update_indices()
                 for h in self.hooks:
@@ -220,6 +226,9 @@ class Engine:
             return
         self.prices[sym] = float(df["close"].iloc[-1])
         self.candles[(market, sym)] = df.tail(400).reset_index(drop=True)
+        if self.money_mode(market) == "live" and db.get_bool("opportunity_enabled"):
+            if self._opportunity(sym, market, b, df):
+                return
         sim_off = self.sim_paused(market)
         if sim_off and not db.one("SELECT 1 FROM positions WHERE symbol=?", (sym,)):
             self._st(market, sym, "coletando dados", "simulação parada: só lendo preços (dinheiro real ligado)")
@@ -343,6 +352,96 @@ class Engine:
                                market=market)
             self._st(market, sym, "comprando", "sinal de compra gerado agora", champ["name"])
 
+    # ------------------------------------------------- agente de oportunidade
+    def _order_qty(self, sym: str, b, eq: float, cash: float, px: float, stop: float, mult: float) -> float:
+        qty = b.normalize_qty(sym, risk.position_size(eq, cash, px, stop, sym, mult), px)
+        if qty <= 0:  # banca pequena: sobe para a ordem mínima se couber em até 35% do saldo
+            try:
+                lim = (getattr(b, "markets", {}) or {}).get(sym, {}).get("limits", {})
+                min_cost = float((lim.get("cost") or {}).get("min") or 0) or \
+                    float((lim.get("amount") or {}).get("min") or 0) * px
+            except Exception:
+                min_cost = 0.0
+            if min_cost and min_cost <= 0.35 * eq and cash >= min_cost * 1.03:
+                qty = b.normalize_qty(sym, min_cost * 1.03 / px, px)
+        return qty
+
+    def _opportunity(self, sym: str, market: str, b, df1h) -> bool:
+        """Compra/vende por oportunidade (queda rápida + repique) no gráfico de 15 min, a cada minuto.
+        Retorna True quando tratou o ativo (posição de oportunidade aberta ou compra feita agora)."""
+        pos = db.one("SELECT * FROM positions WHERE symbol=?", (sym,))
+        if pos and pos.get("strategy") != "oportunidade":
+            return False  # posição de outra estratégia: o fluxo normal cuida
+        try:
+            d15 = b.fetch_ohlcv(sym, opportunity.TF, 500)
+            self.opp_frames[sym] = d15
+        except Exception as e:
+            if not pos:
+                return False
+            d15 = None
+            db.log(f"{sym}: candles de 15 min indisponíveis para a oportunidade ({e})", "WARN")
+        cost = 2 * (self.fee_for(market) + self.cfg.slippage)
+        if pos:  # gerencia a posição de oportunidade a cada minuto
+            px = self.price(sym, market)
+            entry, stop, take = pos["avg_price"], pos["stop"] or 0, pos["take"] or 0
+            if take and px >= entry + (take - entry) / 2:
+                stop = max(stop, entry * (1 + cost))  # andou metade do caminho: protege o empate com taxas
+            db.execute("UPDATE positions SET highest=?, stop=? WHERE symbol=?",
+                       (max(pos["highest"] or entry, px), stop, sym))
+            opened = datetime.fromisoformat(pos["opened_ts"])
+            if opened.tzinfo is None:
+                opened = opened.replace(tzinfo=timezone.utc)
+            old = datetime.now(timezone.utc) - opened > timedelta(minutes=15 * opportunity.MAX_BARS)
+            self._st(market, sym, "comprado", f"🎯 oportunidade · resultado {px / entry - 1:+.2%} · "
+                     f"stop {stop:.6g} · alvo {take:.6g}", "oportunidade")
+            if stop and px <= stop:
+                self._exit_now(sym, "🎯 stop da oportunidade")
+            elif take and px >= take:
+                self._exit_now(sym, "🎯 alvo da oportunidade atingido")
+            elif old:
+                self._exit_now(sym, "🎯 tempo máximo da oportunidade (12h)")
+            return True
+        r = opportunity.rules()
+        if not r or d15 is None or not opportunity.signal(d15, r):
+            return False
+        reg = brain.regime(df1h)
+        if brain.in_cooldown(sym, opportunity.TF, 4):
+            return False
+        eq, cash = self.market_equity(market)
+        chk = risk.can_open(sym, eq, b.is_market_open(sym), market)
+        if chk.ok:
+            chk = risk.live_guard(market, eq, self.notify)
+        from . import news_agent
+        veto = news_agent.blocks_buy(sym)
+        if not chk.ok or veto:
+            self._st(market, sym, "bloqueado", f"🎯 oportunidade vetada: {chk.reason if not chk.ok else veto}",
+                     "oportunidade")
+            return True
+        px = self.price(sym, market)
+        stop, take = px * (1 - r["stop"]), px * (1 + r["take"])
+        mult = 0.5 if reg == "queda" else 1.0
+        qty = self._order_qty(sym, b, eq, cash, px, stop, mult)
+        if qty <= 0:
+            self._st(market, sym, "bloqueado", "🎯 oportunidade, mas o valor fica abaixo do mínimo da corretora",
+                     "oportunidade")
+            return True
+        drop = 1 - px / float(d15["high"].tail(opportunity.LOOKBACK).max())
+        why = (f"🎯 oportunidade: caiu {drop:.1%} nas últimas 4h e começou a reagir · alvo +{r['take']:.1%}, "
+               f"stop -{r['stop']:.1%} · regime {reg}" + (" (meia mão)" if mult < 1 else ""))
+        self.create_signal(sym, "buy", qty, px, stop, take, "oportunidade", why, market=market)
+        self._st(market, sym, "comprando", why, "oportunidade")
+        return True
+
+    def _calibrate_opportunity(self) -> None:
+        live = self.live_markets()
+        if not (live and db.get_bool("opportunity_enabled") and opportunity.needs_calibration()):
+            return
+        frames = {k: v for k, v in self.opp_frames.items() if len(v) >= 100}
+        if len(frames) < 3:
+            return
+        cost = 2 * (self.fee_for(live[0]) + self.cfg.slippage)
+        opportunity.save(opportunity.calibrate(frames, cost))
+
     def _update_indices(self) -> None:
         """Índices de referência (ex.: Ibovespa) para o painel, no máximo a cada 5 min."""
         for market, sym, name in self.indices:
@@ -413,10 +512,11 @@ class Engine:
                         chk = risk.live_guard(market, eq, self.notify)
                     if not chk.ok:
                         raise RuntimeError(chk.reason)
+                    # mantém as distâncias do sinal (o alvo já foi ajustado para pagar as taxas)
                     dist = sig["price"] - sig["stop"]
                     stop = px - dist
-                    take = px + db.get_float("take_profit_r") * dist if sig["take"] else 0
-                    qty = b.normalize_qty(sym, risk.position_size(eq, b.get_cash(), px, stop, sym), px)
+                    take = px + (sig["take"] - sig["price"]) if sig["take"] else 0
+                    qty = b.normalize_qty(sym, min(sig["qty"] or 0, b.get_cash() * 0.99 / px), px)
                 else:
                     if not b.is_market_open(sym):
                         raise RuntimeError("mercado fechado")

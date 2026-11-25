@@ -249,3 +249,24 @@ def test_simulacao_para_com_dinheiro_real(fresh_db):
     assert e.create_signal("BTC/USDT", "buy", 1, 100, 95, 110, "x", "y", market="main") is None
     fresh_db.set_setting("simulate_with_live", True)
     assert not e.sim_paused("main")
+
+
+def test_agente_de_oportunidade():
+    import numpy as np
+    import pandas as pd
+    from app import opportunity as op
+    rng = np.random.default_rng(5)
+    frames = {}
+    for k in range(4):
+        c = 100 * np.exp(np.cumsum(rng.normal(0, 0.006, 500)))
+        # quedas rápidas seguidas de repique, para a prova ter o que medir
+        for at in range(40, 480, 45):
+            c[at:at + 4] *= np.array([0.99, 0.975, 0.965, 0.97])
+            c[at + 4:] *= 1.0
+        o = np.r_[c[0], c[:-1]]
+        frames[k] = pd.DataFrame({"open": o, "high": np.maximum(o, c) * 1.002, "low": np.minimum(o, c) * 0.998,
+                                  "close": c, "volume": 1.0})
+    res = op._simulate(frames[0], {"drop": 0.015, "rsi": 35, "take": 0.025, "stop": 0.02}, 0.011)
+    assert all(-0.05 < r < 0.05 for r in res)
+    best = op.calibrate(frames, 0.011)
+    assert best is None or (best["avg"] > 0 and best["take"] >= 2.2 * 0.011)
