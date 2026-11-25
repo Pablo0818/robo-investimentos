@@ -572,7 +572,10 @@ class Engine:
                 fill = b.market_order(sym, "sell", qty)
                 pnl = (fill.price - pos["avg_price"]) * fill.qty - fill.fee
                 left = pos["qty"] - fill.qty
-                if left <= pos["qty"] * 1e-6:
+                if left <= pos["qty"] * 0.01:
+                    # vendeu tudo o que existia (a taxa da compra pode ter sido cobrada na moeda, sobrando
+                    # um resto que não existe na corretora): fecha a posição e conta o custo inteiro
+                    pnl = fill.price * fill.qty - fill.fee - pos["avg_price"] * pos["qty"]
                     db.execute("DELETE FROM positions WHERE symbol=?", (sym,))
                 else:
                     db.execute("UPDATE positions SET qty=? WHERE symbol=?", (left, sym))

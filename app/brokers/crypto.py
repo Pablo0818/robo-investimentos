@@ -158,8 +158,9 @@ class CryptoBroker(Broker):
             try:
                 base = symbol.split("/")[0]
                 free = float(self.ex.fetch_balance().get("free", {}).get(base, 0) or 0)
-                if 0 < free < qty:
-                    qty = float(self.ex.amount_to_precision(symbol, free))
+                if 0 < free < qty * 1.0001:
+                    # arredonda PARA BAIXO: vender 0,00000001 a mais que o saldo faz a corretora recusar
+                    qty = float(self.ex.amount_to_precision(symbol, free * 0.9999))
             except Exception:
                 pass
         o = self.ex.create_order(symbol, "market", side, qty)
