@@ -28,6 +28,8 @@ class CryptoBroker(Broker):
         self.quote = quote
         self.paper = bool(testnet)
         self._markets = None
+        self._alt: dict = {}
+        self._warned: dict = {}
 
     @property
     def markets(self):
@@ -52,30 +54,73 @@ class CryptoBroker(Broker):
         self._markets = None
         return True
 
-    def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
-        import time
+    # fonte reserva de candles em reais (só leitura, sem conta) quando a corretora real falha
+    BRL_DATA_FALLBACKS = ["mercado", "foxbit"]
 
-        n = min(limit + 1, 720)
-        tf_ms = self.ex.parse_timeframe(timeframe) * 1000
-        while True:
-            try:
-                # pede a partir de "agora - n candles": algumas corretoras (ex.: Foxbit) sem isso
-                # devolvem os candles mais antigos, não os de hoje
-                since = int(time.time() * 1000) - n * tf_ms
-                raw = self.ex.fetch_ohlcv(symbol, timeframe=timeframe, since=since, limit=n)
-                break
-            except Exception as e:
-                if self._switch_source(e):
-                    continue
-                if n > 300:  # algumas corretoras (ex.: Foxbit) aceitam menos candles por pedido
-                    n = 500 if n > 500 else 300
-                    continue
-                raise
+    def _frame(self, raw) -> pd.DataFrame:
         df = pd.DataFrame([r[:6] for r in raw], columns=["ts", "open", "high", "low", "close", "volume"])
         df = df.astype(float).sort_values("ts").drop_duplicates("ts")  # algumas devolvem do mais novo ao mais velho
         df["ts"] = pd.to_datetime(df["ts"], unit="ms", utc=True)
+        return df.reset_index(drop=True)
+
+    def _try_candles(self, ex, symbol: str, timeframe: str, n: int, errors: list) -> pd.DataFrame | None:
+        """Tenta várias formas de pedir os candles e só aceita se vierem candles RECENTES."""
+        import time
+
+        tf_ms = ex.parse_timeframe(timeframe) * 1000
+        now = int(time.time() * 1000)
+        tries = [dict(since=now - n * tf_ms, limit=n), dict(limit=n), dict(limit=min(n, 300)),
+                 dict(since=now - 300 * tf_ms, limit=300)]
+        for kw in tries:
+            try:
+                raw = ex.fetch_ohlcv(symbol, timeframe=timeframe, **kw)
+            except Exception as e:
+                if self._switch_source(e):
+                    return None  # trocou a fonte principal; o chamador tenta de novo
+                errors.append(f"{ex.id}: {str(e)[:120]}")
+                continue
+            if not raw:
+                errors.append(f"{ex.id}: nenhum candle")
+                continue
+            df = self._frame(raw)
+            age = now - int(df["ts"].iloc[-1].timestamp() * 1000)
+            if len(df) >= 60 and age <= 3 * tf_ms:
+                return df
+            errors.append(f"{ex.id}: {len(df)} candles, último de {age // 60000} min atrás")
+        return None
+
+    def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
+        import ccxt
+
+        n = min(limit + 1, 500)
+        errors: list[str] = []
+        df = None
+        for _ in range(len(self.DATA_FALLBACKS) + 1):
+            df = self._try_candles(self.ex, symbol, timeframe, n, errors)
+            if df is not None or not errors or self._data_only is False:
+                break
+        if df is None and symbol.endswith("/BRL"):
+            for alt in self.BRL_DATA_FALLBACKS:
+                if alt == self.ex.id:
+                    continue
+                try:
+                    if alt not in self._alt:
+                        self._alt[alt] = getattr(ccxt, alt)({"enableRateLimit": True})
+                    df = self._try_candles(self._alt[alt], symbol, timeframe, n, errors)
+                except Exception as e:
+                    errors.append(f"{alt}: {str(e)[:120]}")
+                if df is not None:
+                    if not self._warned.get(symbol):
+                        from .. import db
+
+                        db.log(f"{symbol}: candles da {self.ex.id} indisponíveis ({'; '.join(errors[:2])}); "
+                               f"usando os da {alt} para analisar (as ordens continuam na {self.ex.id})", "WARN")
+                        self._warned[symbol] = True
+                    break
+        if df is None:
+            raise RuntimeError("não consegui ler os candles: " + " | ".join(errors[:4]))
         if self.keep_forming:  # dinheiro real: usa o candle em formação (preço de agora) para decidir a cada minuto
-            return df.reset_index(drop=True)
+            return df
         return df.iloc[:-1].reset_index(drop=True)  # remove o candle ainda em formação
 
     def last_price(self, symbol: str) -> float:

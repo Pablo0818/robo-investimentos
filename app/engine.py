@@ -26,7 +26,8 @@ class Engine:
             self.brokers["us"] = us_broker
         # mercados operados pelas estratégias automáticas: mercado -> ativos
         self.strategy_markets: dict[str, list[str]] = {"main": list(cfg.symbols)}
-        self.market_fees: dict[str, float] = {}  # taxa por mercado (corretoras reais cobram mais)
+        self.market_fees: dict[str, float] = {}
+        self._last_err: dict[str, str] = {}  # taxa por mercado (corretoras reais cobram mais)
         self.notify = notify or (lambda m: None)
         self.on_signal = on_signal or (lambda s: None)
         self.lock = threading.RLock()
@@ -173,7 +174,11 @@ class Engine:
                         try:
                             self.process_symbol(sym, market)
                         except Exception as e:
-                            db.log(f"{sym}: erro no ciclo: {e}", "ERROR")
+                            self._st(market, sym, "erro", str(e)[:180])
+                            key = f"{market}:{sym}:{str(e)[:60]}"
+                            if self._last_err.get(sym) != key:  # não enche o registro com o mesmo erro
+                                db.log(f"{sym}: erro no ciclo: {e}", "ERROR")
+                                self._last_err[sym] = key
                 for p in db.query("SELECT symbol, market FROM positions WHERE market='us'"):
                     try:
                         self.price(p["symbol"], p["market"])
@@ -186,7 +191,8 @@ class Engine:
                                (db.now(), eq, cash, risk.net_deposits()))
                     if self.live_markets():
                         leq, lcash = self.live_equity()
-                        db.execute("INSERT INTO equity_live(ts,equity,cash) VALUES(?,?,?)", (db.now(), leq, lcash))
+                        if leq > 0:  # saldo 0 é falha de leitura da corretora, não perda: não desenha no gráfico
+                            db.execute("INSERT INTO equity_live(ts,equity,cash) VALUES(?,?,?)", (db.now(), leq, lcash))
                 risk.update_guards(eq, self.notify)
                 self._maybe_evolve()
                 self._update_indices()
@@ -259,8 +265,8 @@ class Engine:
                 self._exit_now(sym, "stop de proteção atingido")
             elif position["take"] and live_px >= position["take"]:
                 self._exit_now(sym, "alvo de lucro atingido")
-            elif brain.wants_exit(df):
-                self._exit_now(sym, brain.wants_exit(df))
+            elif brain.wants_exit(df, position.get("strategy") or champ["name"]):
+                self._exit_now(sym, brain.wants_exit(df, position.get("strategy") or champ["name"]))
             elif want == 0:
                 self.create_signal(sym, "sell", position["qty"], live_px, 0, 0, champ["name"],
                                    f"estratégia {champ['name']} mandou sair", market=market)
@@ -317,6 +323,19 @@ class Engine:
                 return
             qty = b.normalize_qty(sym, risk.position_size(eq, cash, live_px, stop, sym, mult), live_px)
             if qty <= 0:
+                # banca pequena: sobe para a ordem mínima da corretora se ela couber em até 35% do saldo
+                min_cost = 0.0
+                try:
+                    lim = (getattr(b, "markets", {}) or {}).get(sym, {}).get("limits", {})
+                    min_cost = float((lim.get("cost") or {}).get("min") or 0) or \
+                        float((lim.get("amount") or {}).get("min") or 0) * live_px
+                except Exception:
+                    pass
+                if min_cost and min_cost <= 0.35 * eq and cash >= min_cost * 1.03:
+                    qty = b.normalize_qty(sym, min_cost * 1.03 / live_px, live_px)
+            if qty <= 0:
+                self._st(market, sym, "bloqueado", "sinal de compra, mas o valor fica abaixo do mínimo da corretora",
+                         champ["name"])
                 db.log(f"{sym}: sinal de compra, mas o tamanho calculado é menor que o mínimo do ativo", "WARN")
                 return
             self.create_signal(sym, "buy", qty, live_px, stop, take, champ["name"],

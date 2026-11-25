@@ -198,6 +198,14 @@ def create_app(engine: Engine) -> FastAPI:
                 "realized_pnl": lr["s"], "fees": lr["f"], "positions": lpos,
                 "by_market": [x for x in out["by_market"] if x["market"] in live],
             })
+            sts = [v for k, v in engine.state.items() if k[0] in live]
+            if sts:  # resumo do que o robô está fazendo com o dinheiro real, em uma linha
+                import collections
+                c = collections.Counter(v["status"] for v in sts)
+                parts = [f"{n} {k}" for k, n in c.most_common()]
+                worst = next((v for v in sts if v["status"] in ("erro", "bloqueado")), None)
+                out["live_diag"] = f"{len(sts)} moedas: " + ", ".join(parts) + \
+                    (f" · ex.: {worst['symbol']} — {worst['detail'][:90]}" if worst else "")
         return out
 
     @app.get("/api/aovivo", dependencies=protected)

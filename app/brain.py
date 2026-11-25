@@ -114,8 +114,8 @@ def decide_entry(symbol: str, df: pd.DataFrame, champ: dict, price: float, stop:
     if not db.get_bool("brain_enabled"):
         return True, 1.0, ""
     reg = regime(df)
-    if reg == "queda":
-        return False, 0.0, "agente de regime: mercado em queda (abaixo da média de 200), fico de fora"
+    if reg == "queda" and (champ["name"] in st.RUNNERS or champ["name"] not in st.STYLES["baixa"]):
+        return False, 0.0, "agente de regime: mercado em queda, estratégia de tendência fica de fora"
     if reg == "lateral" and champ["name"] in st.RUNNERS:
         return False, 0.0, "agente de regime: mercado de lado, rompimento costuma falhar"
     if in_cooldown(symbol, timeframe):
@@ -128,10 +128,17 @@ def decide_entry(symbol: str, df: pd.DataFrame, champ: dict, price: float, stop:
     mult = 0.5 + conf  # 0,5x a 1,5x conforme a concordância
     if reg == "alta":
         mult *= 1.1
+    if reg == "queda":  # repique em mercado de queda: só compra na baixa e com metade da mão
+        if n >= 2 and conf < 0.67:
+            return False, 0.0, f"agente de regime: mercado em queda e só {conf:.0%} do comitê a favor"
+        mult *= 0.5
     return True, float(np.clip(mult, 0.5, 1.5)), f"regime {reg}, comitê {conf:.0%} a favor ({n} estratégias)"
 
 
-def wants_exit(df: pd.DataFrame) -> str | None:
+def wants_exit(df: pd.DataFrame, strategy: str = "") -> str | None:
+    """Sai de posições de TENDÊNCIA quando o mercado vira para queda (compras na baixa usam o stop)."""
+    if strategy and strategy not in st.RUNNERS:
+        return None
     if db.get_bool("brain_enabled") and regime(df) == "queda":
         return "agente de regime: o mercado virou para queda"
     return None
