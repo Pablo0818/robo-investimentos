@@ -62,8 +62,9 @@ def build_b3_broker(s: Settings) -> Broker | None:
 __all__ = ["Broker", "Fill", "build_broker", "PaperBroker", "SyntheticFeed"]
 
 
-# taxa de quem executa a ordem a mercado (tomador), conforme as tabelas públicas das corretoras
+# taxas da tabela pública de cada corretora (nível inicial): ordem a mercado (taker) e passiva (maker)
 REAL_FEES = {"foxbit": 0.005, "mercado": 0.007}
+REAL_MAKER_FEES = {"foxbit": 0.0025, "mercado": 0.003}
 
 
 def build_real_broker(s: Settings):
@@ -80,4 +81,6 @@ def build_real_broker(s: Settings):
     b.name = "real"
     b.fee_rate = s.real_fee or REAL_FEES[s.real_exchange]
     b.keep_forming = True  # confere o preço a cada minuto, sem esperar o candle de 1h fechar
-    return b, b.fee_rate
+    b.maker_fee = REAL_MAKER_FEES[s.real_exchange]
+    # custo médio por lado: entra com ordem passiva (maker) e sai no alvo passiva ou no stop a mercado
+    return b, round((b.maker_fee + b.fee_rate) / 2, 5)

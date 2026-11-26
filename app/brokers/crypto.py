@@ -132,6 +132,76 @@ class CryptoBroker(Broker):
             t = self.ex.fetch_ticker(symbol)
         return float(t.get("last") or t.get("close"))
 
+    # ------------------------------------------------ ordens passivas (maker)
+    maker_fee = 0.0  # taxa da ordem passiva (Foxbit Iniciante: 0,25%); 0 = não usar ordens passivas
+
+    def best_bid_ask(self, symbol: str) -> tuple[float, float]:
+        ob = self.ex.fetch_order_book(symbol, 5)
+        return float(ob["bids"][0][0]), float(ob["asks"][0][0])
+
+    def _order_fill(self, o: dict, fallback_price: float) -> tuple[float, float]:
+        filled = float(o.get("filled") or 0)
+        price = float(o.get("average") or o.get("price") or fallback_price)
+        return filled, price
+
+    def maker_buy(self, symbol: str, qty: float, wait_s: int = 45) -> Fill | None:
+        """Compra com ordem LIMITE no melhor preço de compra (paga a taxa menor). Espera até wait_s;
+        o que não executar é cancelado. Retorna None se nada executou."""
+        import time
+
+        bid, ask = self.best_bid_ask(symbol)
+        price = float(self.ex.price_to_precision(symbol, bid))
+        o = self.ex.create_order(symbol, "limit", "buy", qty, price, {"postOnly": True})
+        oid = o["id"]
+        deadline = time.time() + wait_s
+        while time.time() < deadline:
+            time.sleep(3)
+            o = self.ex.fetch_order(oid, symbol)
+            if o.get("status") in ("closed", "canceled", "cancelled", "rejected"):
+                break
+        if o.get("status") not in ("closed", "canceled", "cancelled", "rejected"):
+            try:
+                self.ex.cancel_order(oid, symbol)
+            except Exception:
+                pass
+            o = self.ex.fetch_order(oid, symbol)
+        filled, avg = self._order_fill(o, price)
+        if filled <= 0:
+            return None
+        return Fill(symbol, "buy", filled, avg, filled * avg * self.maker_fee, str(oid))
+
+    def place_take(self, symbol: str, qty: float, price: float) -> str | None:
+        """Deixa a venda no alvo esperando no livro da corretora (ordem passiva)."""
+        try:
+            base = symbol.split("/")[0]
+            free = float(self.ex.fetch_balance().get("free", {}).get(base, 0) or 0)
+            q = float(self.ex.amount_to_precision(symbol, min(qty, free * 0.9999)))
+            p = float(self.ex.price_to_precision(symbol, price))
+            o = self.ex.create_order(symbol, "limit", "sell", q, p, {"postOnly": True})
+            return str(o["id"])
+        except Exception as e:
+            from .. import db
+
+            db.log(f"{symbol}: não consegui deixar a venda no alvo no livro ({str(e)[:120]}); "
+                   "o robô vende a mercado quando bater o alvo", "WARN")
+            return None
+
+    def take_status(self, symbol: str, oid: str) -> tuple[str, float, float]:
+        """(status, quantidade executada, preço) da venda no alvo."""
+        o = self.ex.fetch_order(oid, symbol)
+        filled, price = self._order_fill(o, 0)
+        return o.get("status") or "open", filled, price
+
+    def cancel_open_orders(self, symbol: str) -> None:
+        try:
+            for o in self.ex.fetch_open_orders(symbol):
+                try:
+                    self.ex.cancel_order(o["id"], symbol)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     def get_cash(self) -> float:
         bal = self.ex.fetch_balance()
         return float(bal.get("free", {}).get(self.quote, 0.0) or 0.0)
@@ -154,6 +224,8 @@ class CryptoBroker(Broker):
 
     def market_order(self, symbol: str, side: str, qty: float) -> Fill:
         if side == "sell" and not self.paper:
+            if self.maker_fee:
+                self.cancel_open_orders(symbol)  # libera a moeda presa na venda do alvo
             # a taxa da compra pode ter sido cobrada na própria moeda: vende o que existe de verdade
             try:
                 base = symbol.split("/")[0]

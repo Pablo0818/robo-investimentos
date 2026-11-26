@@ -263,6 +263,8 @@ class Engine:
         position = db.one("SELECT * FROM positions WHERE symbol=?", (sym,))
         live_px = self.price(sym, market)
 
+        if position and self._check_take_order(sym, position, market, b):
+            return
         if position:
             hi = max(position["highest"] or position["avg_price"], live_px)
             stop = position["stop"]
@@ -273,7 +275,7 @@ class Engine:
                      f"{stop:.6g} · " + (f"alvo {position['take']:.6g}" if position['take'] else "deixando o lucro correr (stop móvel)"), champ["name"])
             if stop and live_px <= stop:
                 self._exit_now(sym, "stop de proteção atingido")
-            elif position["take"] and live_px >= position["take"]:
+            elif position["take"] and live_px >= position["take"] and not position.get("take_order"):
                 self._exit_now(sym, "alvo de lucro atingido")
             elif brain.wants_exit(df, position.get("strategy") or champ["name"]):
                 self._exit_now(sym, brain.wants_exit(df, position.get("strategy") or champ["name"]))
@@ -383,6 +385,8 @@ class Engine:
             db.log(f"{sym}: candles de 15 min indisponíveis para a oportunidade ({e})", "WARN")
         cost = 2 * (self.fee_for(market) + self.cfg.slippage)
         if pos:  # gerencia a posição de oportunidade a cada minuto
+            if self._check_take_order(sym, pos, market, b):
+                return True
             px = self.price(sym, market)
             entry, stop, take = pos["avg_price"], pos["stop"] or 0, pos["take"] or 0
             if take and px >= entry + (take - entry) / 2:
@@ -397,7 +401,7 @@ class Engine:
                      f"stop {stop:.6g} · alvo {take:.6g}", "oportunidade")
             if stop and px <= stop:
                 self._exit_now(sym, "🎯 stop da oportunidade")
-            elif take and px >= take:
+            elif take and px >= take and not pos.get("take_order"):
                 self._exit_now(sym, "🎯 alvo da oportunidade atingido")
             elif old:
                 self._exit_now(sym, "🎯 tempo máximo da oportunidade (12h)")
@@ -551,7 +555,17 @@ class Engine:
                     qty = b.normalize_qty(sym, min(qty, b.get_cash() * 0.99 / px), px)
                 if qty <= 0:
                     raise RuntimeError("quantidade abaixo do mínimo / sem saldo")
-                fill = b.market_order(sym, "buy", qty)
+                maker = self._use_maker(market, b)
+                if maker:
+                    fill = b.maker_buy(sym, qty)
+                    if fill is None:  # ninguém vendeu no nosso preço a tempo: não é erro, só passou
+                        db.execute("UPDATE signals SET status='expired', note=? WHERE id=?",
+                                   ("ordem passiva não executou em 45 s (o preço subiu)", sig["id"]))
+                        msg = f"⏳ {sym}: ordem passiva de compra não executou a tempo; tento de novo no próximo sinal"
+                        db.log(msg)
+                        return msg
+                else:
+                    fill = b.market_order(sym, "buy", qty)
                 cost = fill.price * fill.qty + fill.fee
                 pos = db.one("SELECT * FROM positions WHERE symbol=?", (sym,))
                 if pos:
@@ -559,16 +573,28 @@ class Engine:
                     avg = (pos["avg_price"] * pos["qty"] + cost) / nq
                     db.execute("UPDATE positions SET qty=?, avg_price=? WHERE symbol=?", (nq, avg, sym))
                 else:
+                    if maker and take:  # mantém o alvo novo coerente com o preço que de fato executou
+                        take = fill.price + (take - px)
                     db.execute("INSERT INTO positions(symbol,qty,avg_price,stop,take,opened_ts,strategy,highest,market,mode)"
                                " VALUES(?,?,?,?,?,?,?,?,?,?)",
                                (sym, fill.qty, cost / fill.qty, stop, take, db.now(), sig["strategy"], fill.price, market,
                                 self.money_mode(market)))
+                    if maker and take:  # deixa a venda no alvo esperando no livro: sai com a taxa menor
+                        oid = b.place_take(sym, fill.qty, take)
+                        if oid:
+                            db.execute("UPDATE positions SET take_order=? WHERE symbol=?", (oid, sym))
                 pnl = 0.0
             else:
                 pos = db.one("SELECT * FROM positions WHERE symbol=?", (sym,))
                 if not pos:
                     raise RuntimeError("não há posição para vender")
                 qty = min(sig["qty"] or pos["qty"], pos["qty"])
+                part_qty = part_px = 0.0  # parte que já tinha saído pela venda no alvo (ordem passiva)
+                if pos.get("take_order"):
+                    try:
+                        _, part_qty, part_px = b.take_status(sym, pos["take_order"])
+                    except Exception:
+                        pass
                 fill = b.market_order(sym, "sell", qty)
                 pnl = (fill.price - pos["avg_price"]) * fill.qty - fill.fee
                 left = pos["qty"] - fill.qty
@@ -576,6 +602,8 @@ class Engine:
                     # vendeu tudo o que existia (a taxa da compra pode ter sido cobrada na moeda, sobrando
                     # um resto que não existe na corretora): fecha a posição e conta o custo inteiro
                     pnl = fill.price * fill.qty - fill.fee - pos["avg_price"] * pos["qty"]
+                    if part_qty:
+                        pnl += part_qty * part_px * (1 - getattr(b, "maker_fee", 0))
                     db.execute("DELETE FROM positions WHERE symbol=?", (sym,))
                 else:
                     db.execute("UPDATE positions SET qty=? WHERE symbol=?", (left, sym))
@@ -600,6 +628,36 @@ class Engine:
             db.log(msg, "ERROR")
             self.notify(msg)
             return msg
+
+    def _use_maker(self, market: str, b) -> bool:
+        return (self.money_mode(market) == "live" and bool(getattr(b, "maker_fee", 0))
+                and db.get_bool("maker_orders"))
+
+    def _check_take_order(self, sym: str, pos: dict, market: str, b) -> bool:
+        """A venda no alvo (ordem passiva) executou na corretora? Se sim, registra e fecha a posição."""
+        oid = pos.get("take_order")
+        if not oid:
+            return False
+        try:
+            status, filled, price = b.take_status(sym, oid)
+        except Exception as e:
+            db.log(f"{sym}: não consegui conferir a venda no alvo ({str(e)[:100]})", "WARN")
+            return False
+        if status == "closed" and filled > 0:
+            fee = filled * price * getattr(b, "maker_fee", 0)
+            pnl = price * filled - fee - pos["avg_price"] * pos["qty"]
+            db.execute("INSERT INTO trades(ts,symbol,side,qty,price,fee,pnl,signal_id,strategy,reason,market,mode)"
+                       " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                       (db.now(), sym, "sell", filled, price, fee, pnl, None, pos["strategy"],
+                        "alvo atingido (venda passiva no livro)", market, self.money_mode(market)))
+            db.execute("DELETE FROM positions WHERE symbol=?", (sym,))
+            msg = f"✅ VENDA executada no alvo: {filled:.6g} {sym} @ {price:.6g} | resultado {pnl:+.2f}"
+            db.log(msg)
+            self.notify(msg)
+            return True
+        if status in ("canceled", "cancelled", "rejected", "expired"):
+            db.execute("UPDATE positions SET take_order=NULL WHERE symbol=?", (sym,))
+        return False
 
     def _exit_now(self, sym: str, reason: str) -> str:
         """Saída de proteção: executa na hora, em qualquer modo."""

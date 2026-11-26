@@ -16,8 +16,11 @@ class FakeFoxbit:
 
     def __init__(self, params=None):
         self.bal = {"BRL": 100.0}
-        self.orders = []
+        self.locked = {}
+        self.orders = []       # execuções (símbolo, lado, qtd, preço, tipo)
+        self.open = {}         # ordens limite no livro
         self.px_override = {}
+        self.fill_limits = True  # False = ninguém executa nossas ordens passivas
 
     def parse_timeframe(self, tf):
         return {"15m": 900, "1h": 3600}[tf]
@@ -65,21 +68,75 @@ class FakeFoxbit:
     def amount_to_precision(self, s, q):
         return f"{float(q):.8f}"
 
-    def create_order(self, s, t, side, q):
-        q = float(q)
+    def price_to_precision(self, s, p):
+        return f"{float(p):.6f}"
+
+    def fetch_order_book(self, s, limit=5):
         px = self.fetch_ticker(s)["last"]
+        return {"bids": [[px * 0.999, 1]], "asks": [[px * 1.001, 1]]}
+
+    def _exec(self, s, side, q, px, maker):
+        fee = 0.9975 if maker else 0.995
         base = s.split("/")[0]
+        if side == "buy":
+            self.bal[base] = self.bal.get(base, 0) + q * fee
+        else:
+            self.bal["BRL"] += q * px * fee
+        self.orders.append((s, side, q, px, "limit" if maker else "market"))
+
+    def fetch_order(self, oid, s):
+        o = self.open[oid]
+        if o["status"] == "open" and self.fill_limits:
+            px = self.fetch_ticker(s)["last"]
+            hit = px <= o["price"] * 1.002 if o["side"] == "buy" else px >= o["price"]
+            if hit:
+                o["status"], o["filled"] = "closed", o["amount"]
+                if o["side"] == "sell":
+                    self.locked[s.split("/")[0]] -= o["amount"]
+                self._exec(s, o["side"], o["amount"], o["price"], True)
+        return {"id": oid, "status": o["status"], "filled": o["filled"], "price": o["price"], "average": None}
+
+    def cancel_order(self, oid, s):
+        o = self.open[oid]
+        if o["status"] == "open":
+            o["status"] = "canceled"
+            base = s.split("/")[0]
+            if o["side"] == "buy":
+                self.bal["BRL"] += o["amount"] * o["price"]
+            else:
+                self.locked[base] -= o["amount"]
+                self.bal[base] += o["amount"]
+        return {"id": oid}
+
+    def fetch_open_orders(self, s):
+        return [{"id": k} for k, o in self.open.items() if o["status"] == "open" and o["symbol"] == s]
+
+    def create_order(self, s, t, side, q, price=None, params=None):
+        q = float(q)
+        base = s.split("/")[0]
+        if t == "limit":
+            price = float(price)
+            assert q * price >= 10, "abaixo da ordem mínima"
+            if side == "buy":
+                assert self.bal["BRL"] >= q * price - 1e-9, "saldo insuficiente"
+                self.bal["BRL"] -= q * price
+            else:
+                assert self.bal.get(base, 0) + 1e-12 >= q, "vendendo mais do que tem"
+                self.bal[base] -= q
+                self.locked[base] = self.locked.get(base, 0) + q
+            oid = f"L{len(self.open) + 1}"
+            self.open[oid] = {"symbol": s, "side": side, "amount": q, "price": price, "status": "open", "filled": 0}
+            return {"id": oid}
+        px = self.fetch_ticker(s)["last"]
         if side == "buy":
             assert q * px >= 10, "abaixo da ordem mínima"
             assert self.bal["BRL"] >= q * px, "saldo insuficiente"
             self.bal["BRL"] -= q * px
-            self.bal[base] = self.bal.get(base, 0) + q * 0.995  # taxa cobrada na moeda
         else:
             assert self.bal.get(base, 0) + 1e-12 >= q, "vendendo mais do que tem"
             self.bal[base] -= q
-            self.bal["BRL"] += q * px * 0.995
-        self.orders.append((s, side, q, px))
-        return {"id": len(self.orders)}  # a Foxbit responde só com o id
+        self._exec(s, side, q, px, False)  # taxa cobrada na moeda (compra) ou em reais (venda)
+        return {"id": f"M{len(self.orders)}"}  # a Foxbit responde só com o id
 
 
 @pytest.fixture()
@@ -111,14 +168,16 @@ def test_dinheiro_real_compra_e_vende_por_oportunidade(real_engine):
     e, ex, db = real_engine
     e.cycle()
     assert e.live_markets() == ["real"]
-    assert ("SOL/BRL", "buy") == ex.orders[0][:2], f"não comprou na oportunidade: {e.state}"
+    assert ("SOL/BRL", "buy", "limit") == (ex.orders[0][0], ex.orders[0][1], ex.orders[0][4]), \
+        f"não comprou na oportunidade com ordem passiva: {e.state}"
     pos = db.one("SELECT * FROM positions WHERE symbol='SOL/BRL'")
     assert pos["strategy"] == "oportunidade" and pos["take"] > pos["avg_price"] > pos["stop"] > 0
     assert (pos["take"] / pos["avg_price"] - 1) > 2 * 2 * e.fee_for("real")  # alvo paga as taxas
+    assert pos["take_order"], "a venda no alvo não ficou no livro"
     assert e.state[("real", "BTC/BRL")]["status"] != "erro", "candles não lidos (plano B falhou)"
     ex.px_override["SOL/BRL"] = pos["take"] * 1.001  # preço bate o alvo
     e.cycle()
-    assert ex.orders[-1][:2] == ("SOL/BRL", "sell"), "não vendeu no alvo"
+    assert ex.orders[-1][:2] == ("SOL/BRL", "sell") and ex.orders[-1][4] == "limit", "não vendeu no alvo"
     sell = db.one("SELECT * FROM trades WHERE symbol='SOL/BRL' AND side='sell'")
     assert sell["pnl"] > 0 and sell["fee"] > 0  # lucro depois das taxas e taxa registrada
     assert not db.one("SELECT * FROM positions WHERE symbol='SOL/BRL'")
@@ -130,10 +189,14 @@ def test_dinheiro_real_stop_e_saldo(real_engine):
     pos = db.one("SELECT * FROM positions WHERE symbol='SOL/BRL'")
     ex.px_override["SOL/BRL"] = pos["stop"] * 0.999  # preço fura o stop
     e.cycle()
-    assert ex.orders[-1][:2] == ("SOL/BRL", "sell")
+    assert ex.orders[-1][:2] == ("SOL/BRL", "sell") and ex.orders[-1][4] == "market"
+    assert not ex.fetch_open_orders("SOL/BRL"), "a venda do alvo ficou presa no livro"
+    assert ex.locked.get("SOL", 0) == 0 and ex.bal.get("SOL", 0) * pos["avg_price"] < 0.01  # só poeira
     assert db.one("SELECT pnl FROM trades WHERE side='sell'")["pnl"] < 0
     leq, cash = e.live_equity()
-    assert 95 < leq < 100 and cash == leq  # perdeu pouco, tudo de volta em reais
+    held = sum(p["qty"] * e.prices.get(p["symbol"], p["avg_price"]) for p in db.query("SELECT * FROM positions"))
+    assert 95 < leq < 100 and abs(leq - (cash + held)) < 0.01  # perdeu pouco; conta fecha com reais + posições
+    assert not db.one("SELECT * FROM positions WHERE symbol='SOL/BRL'")
 
 
 def test_autoteste_e_ordem_de_teste(real_engine):
@@ -147,6 +210,24 @@ def test_autoteste_e_ordem_de_teste(real_engine):
     t = selftest.order_test(e)
     assert t["ok"], t
     assert [o[1] for o in ex.orders[-2:]] == ["buy", "sell"]
+
+
+def test_ordem_passiva_que_nao_executa_nao_vira_erro(real_engine):
+    e, ex, db = real_engine
+    ex.fill_limits = False  # ninguém aceita o nosso preço
+    import app.brokers.crypto as cb
+    import time as _t
+    orig = cb.CryptoBroker.maker_buy
+    cb.CryptoBroker.maker_buy = lambda self, s, q, wait_s=45: orig(self, s, q, wait_s=0)
+    try:
+        e.cycle()
+    finally:
+        cb.CryptoBroker.maker_buy = orig
+    assert not db.one("SELECT * FROM positions WHERE symbol='SOL/BRL'")
+    assert not ex.fetch_open_orders("SOL/BRL"), "a ordem que não executou não foi cancelada"
+    assert abs(ex.bal["BRL"] - 100) < 1e-6, "o dinheiro ficou preso"
+    assert db.one("SELECT status FROM signals WHERE symbol='SOL/BRL'")["status"] == "expired"
+    assert not db.query("SELECT * FROM logs WHERE level='ERROR'")
 
 
 def test_autoteste_acusa_chave_invalida(real_engine, monkeypatch):

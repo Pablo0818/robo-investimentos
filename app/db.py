@@ -70,6 +70,10 @@ def conn() -> sqlite3.Connection:
                     _conn.execute(f"ALTER TABLE {tbl} ADD COLUMN mode TEXT DEFAULT 'paper'")
                 except sqlite3.OperationalError:
                     pass
+            try:  # ordem de venda no alvo deixada no livro da corretora (ordem passiva, taxa menor)
+                _conn.execute("ALTER TABLE positions ADD COLUMN take_order TEXT")
+            except sqlite3.OperationalError:
+                pass
             _conn_path = settings.db_path
             for k, v in DEFAULT_RUNTIME.items():
                 _conn.execute("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)", (k, v))
